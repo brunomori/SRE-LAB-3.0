@@ -8,6 +8,11 @@ Documentação incremental de um laboratório prático de **Site Reliability Eng
 | --- | --- | --- |
 | [01 — Iniciar o laboratório](01-iniciar-laboratorio/README.md) | Subir VMs, configurar kubectl, validar o cluster e desligar o ambiente | ✅ Documentado |
 
+
+## Como documentar novos temas
+
+Use a [Skill — Documentação do SRE LAB](../.github/skills/sre-lab-documentacao/SKILL.md) como procedimento para registrar cada nova prática no GitHub. Basta pedir: **“Documenta o que fizemos no SRE LAB e atualiza o índice no GitHub.”**
+
 ## Próximos temas (conforme evolução do laboratório)
 
 - Aplicação web e banco de dados no Kubernetes
