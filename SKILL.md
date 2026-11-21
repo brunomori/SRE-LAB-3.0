@@ -1,6 +1,6 @@
 ---
 name: sre-lab-documentacao
-description: Documentar incrementalmente os temas do SRE LAB 3.0 no GitHub, com README.md prático, links no índice e validação após publicação. Use quando o usuário pedir para registrar, documentar, adicionar ou continuar um tema do SRE LAB.
+description: Documentar incrementalmente os temas do SRE LAB 3.0 no GitHub, com README.md prático para cada tema, mantendo a raiz como overview do projeto e validação após publicação. Use quando o usuário pedir para registrar, documentar, adicionar ou continuar um tema do SRE LAB.
 ---
 
 # Skill — Documentação incremental do SRE LAB 3.0
@@ -13,7 +13,7 @@ Transformar cada atividade prática do laboratório SRE em documentação Markdo
 
 - **Repositório:** `brunomori/workspace-devops-automation`
 - **Branch padrão:** `main` (verificar antes de gravar).
-- **Índice:** `README.md`
+- **README principal (overview e navegação breve):** `README.md`
 - **Temas:** `NN-nome-do-tema/README.md`
 - **Tema inicial existente:** `01-iniciar-laboratorio/README.md`
 - **Idioma:** português (Brasil), preservando nomes técnicos, comandos e arquivos.
@@ -30,10 +30,10 @@ Transformar cada atividade prática do laboratório SRE em documentação Markdo
 ## Fluxo obrigatório
 
 1. **Entender o tema atual.** Utilizar o que foi efetivamente informado/feito na conversa. Se faltar um detalhe essencial para comandos corretos, consultar arquivos relevantes ou perguntar apenas o necessário. Não inventar saídas ou etapas validadas.
-2. **Conferir o GitHub.** Ler o índice do SRE LAB, localizar a próxima numeração e conferir se já existe tema com mesmo assunto. Evitar duplicatas.
+2. **Conferir o GitHub.** Ler o README principal (overview), inspecionar as pastas existentes, localizar a próxima numeração e conferir se já existe tema com mesmo assunto. Evitar duplicatas.
 3. **Preparar o README.** Registrar objetivo, pré-requisitos, comandos, verificação de sucesso, troubleshooting e referências quando úteis. Indicar claramente o que foi *testado* versus *sugerido*.
 4. **Criar ou atualizar o arquivo do tema.** Para tema novo, criar `NN-slug/README.md`. Para continuação do mesmo tema, atualizar o README correspondente com base na versão mais recente, sem apagar notas úteis.
-5. **Atualizar o índice.** Adicionar link, descrição de uma linha e status real no `README.md`. Alterar apenas o índice principal e os arquivos pertinentes ao tema.
+5. **Atualizar a navegação sem poluir a visão geral.** Adicionar no `README.md` principal somente um link curto para o tema e seu status, sem copiar comandos ou instruções das pastas. Preservar proposta, arquitetura, metodologia e roadmap como foco do README principal.
 6. **Verificar a publicação.** Buscar de volta os arquivos no GitHub e confirmar os links e conteúdo publicado.
 7. **Responder com resultado.** Informar quais arquivos mudaram, incluir links diretos e destacar o próximo passo no laboratório.
 
@@ -62,7 +62,7 @@ Problemas observados e como investigá-los.
 ## Próximos passos
 Como continuar o laboratório.
 
-[← Índice do SRE LAB 3.0](../README.md)
+[← Visão geral do SRE LAB 3.0](../README.md)
 ```
 
 Adaptar as seções: um guia de consulta rápida pode ser bem menor.
@@ -83,6 +83,6 @@ Ambiente local Ubuntu com Vagrant, VirtualBox, Kubespray e Kubernetes. Estudos p
 
 ## Atalho de uso
 
-**Pedido curto:** "Documenta o que fizemos hoje no SRE LAB, seguindo a skill `sre-lab-documentacao` e atualiza o índice no GitHub."
+**Pedido curto:** "Documenta o que fizemos hoje no SRE LAB, seguindo a skill `sre-lab-documentacao` e atualiza a navegação do README principal no GitHub."
 
 Este arquivo é a fonte persistente das instruções. Assistentes devem consultar a versão atual no repositório quando forem solicitados a usar a skill; ela não é automaticamente carregada em toda conversa do ChatGPT.
