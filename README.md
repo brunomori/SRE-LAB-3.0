@@ -26,3 +26,8 @@ O workflow [`hello.yml`](.github/workflows/hello.yml) executa uma mensagem de te
 - [Docker](https://github.com/brunomori/Docker)
 
 Documentação em português; nomes de workflows e commits podem utilizar inglês técnico.
+
+## SRE LAB 3.0
+
+- [Acessar índice dos temas](sre-lab-3.0/README.md)
+- [Tema 01 — Iniciar o laboratório](sre-lab-3.0/01-iniciar-laboratorio/README.md)
