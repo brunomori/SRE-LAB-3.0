@@ -1,33 +1,58 @@
-# DevOps Automation Workspace
+# SRE LAB 3.0 — Laboratório Prático de SRE
 
-Laboratório de estudos em automação DevOps e integração contínua com GitHub Actions.
+Laboratório pessoal de **Site Reliability Engineering (SRE)** para estudar infraestrutura, Kubernetes, CI/CD, GitOps e observabilidade com práticas documentadas e reproduzíveis.
 
-## Estado atual
+## Ambiente do laboratório
 
-O workflow [`hello.yml`](.github/workflows/hello.yml) executa uma mensagem de teste em um runner Ubuntu quando ocorre um push na branch `main`. É um primeiro exercício de CI, não um pipeline de produção.
+- **Host:** Ubuntu Linux
+- **Virtualização:** Vagrant + VirtualBox
+- **Cluster:** Kubernetes instalado com Kubespray
+- **Objetivo:** evoluir de fundamentos até deploys, pipelines, automação, monitoramento e troubleshooting.
 
-## Como verificar
+> Este repositório contém **documentação**. As máquinas virtuais, credenciais, configurações locais e artefatos sensíveis não são versionados aqui.
 
-1. Consulte a aba **Actions** do repositório.
-2. Abra uma execução de **Hello GitHub Actions**.
-3. Confira o resultado do job `say-hello` e o log da etapa.
+## 📚 Temas documentados
 
-## Roadmap
+| Tema | Assunto | Situação |
+| --- | --- | --- |
+| [01 — Iniciar o laboratório](01-iniciar-laboratorio/README.md) | Iniciar as VMs, configurar `kubectl`, verificar o cluster e desligar o ambiente | Guia publicado |
 
-- [ ] Validar arquivos YAML e documentação em pull requests.
-- [ ] Adicionar testes para scripts e manifestos de laboratório.
-- [ ] Documentar permissões mínimas e troubleshooting dos workflows.
-- [ ] Integrar exemplos de CI aos laboratórios de infraestrutura.
+## 🚀 Começar rapidamente
 
-## Projetos relacionados
+No Ubuntu, considerando o caminho local utilizado no laboratório:
 
-- [Kubernetes — exercícios](https://github.com/brunomori/Exercicio-Kubernets-)
-- [Terraform](https://github.com/brunomori/Terraform)
-- [Docker](https://github.com/brunomori/Docker)
+```bash
+cd ~/Downloads/sre-lab
+make start
 
-Documentação em português; nomes de workflows e commits podem utilizar inglês técnico.
+export KUBECONFIG="$PWD/.local/sre-lab.kubeconfig"
+export PATH="$PWD/.local/bin:$PATH"
 
-## SRE LAB 3.0
+kubectl get nodes -o wide
+kubectl get pods -A
+```
 
-- [Acessar índice dos temas](sre-lab-3.0/README.md)
-- [Tema 01 — Iniciar o laboratório](sre-lab-3.0/01-iniciar-laboratorio/README.md)
+Os comandos acima são um **guia de consulta**: confirme os caminhos e os alvos disponíveis no `Makefile` local antes de executar.
+
+**Guia completo:** [Tema 01 — Iniciar o laboratório](01-iniciar-laboratorio/README.md).
+
+## 🧭 Roadmap
+
+- [x] Documentar a inicialização do ambiente Kubernetes
+- [ ] Aplicação web e banco de dados
+- [ ] Jenkins e CI/CD
+- [ ] Helm e configurações DEV/UAT/PROD
+- [ ] Argo CD e GitOps
+- [ ] Terraform e Terragrunt
+- [ ] Observabilidade: Prometheus, Grafana e Zabbix
+- [ ] Runbooks e troubleshooting de incidentes
+
+## 📝 Padrão de documentação
+
+Cada tema ganha uma pasta `NN-nome-do-tema/` com `README.md` prático, comandos, validações e troubleshooting. A numeração cresce conforme o laboratório evolui.
+
+A referência do processo está em [SKILL.md](SKILL.md). Para solicitar a documentação de um novo tema: **“Documenta o que fizemos no SRE LAB e atualiza o GitHub.”**
+
+---
+
+*Projeto em evolução — documentação técnica em português.*

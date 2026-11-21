@@ -13,9 +13,9 @@ Transformar cada atividade prática do laboratório SRE em documentação Markdo
 
 - **Repositório:** `brunomori/workspace-devops-automation`
 - **Branch padrão:** `main` (verificar antes de gravar).
-- **Índice:** `sre-lab-3.0/README.md`
-- **Temas:** `sre-lab-3.0/NN-nome-do-tema/README.md`
-- **Tema inicial existente:** `sre-lab-3.0/01-iniciar-laboratorio/README.md`
+- **Índice:** `README.md`
+- **Temas:** `NN-nome-do-tema/README.md`
+- **Tema inicial existente:** `01-iniciar-laboratorio/README.md`
 - **Idioma:** português (Brasil), preservando nomes técnicos, comandos e arquivos.
 - **Estilo:** didático, objetivo, mãos na massa, Markdown válido e comandos em blocos de código `bash`/`yaml` quando relevante.
 
@@ -33,7 +33,7 @@ Transformar cada atividade prática do laboratório SRE em documentação Markdo
 2. **Conferir o GitHub.** Ler o índice do SRE LAB, localizar a próxima numeração e conferir se já existe tema com mesmo assunto. Evitar duplicatas.
 3. **Preparar o README.** Registrar objetivo, pré-requisitos, comandos, verificação de sucesso, troubleshooting e referências quando úteis. Indicar claramente o que foi *testado* versus *sugerido*.
 4. **Criar ou atualizar o arquivo do tema.** Para tema novo, criar `NN-slug/README.md`. Para continuação do mesmo tema, atualizar o README correspondente com base na versão mais recente, sem apagar notas úteis.
-5. **Atualizar o índice.** Adicionar link, descrição de uma linha e status real no `sre-lab-3.0/README.md`. Evitar editar a raiz do repositório sem necessidade.
+5. **Atualizar o índice.** Adicionar link, descrição de uma linha e status real no `README.md`. Alterar apenas o índice principal e os arquivos pertinentes ao tema.
 6. **Verificar a publicação.** Buscar de volta os arquivos no GitHub e confirmar os links e conteúdo publicado.
 7. **Responder com resultado.** Informar quais arquivos mudaram, incluir links diretos e destacar o próximo passo no laboratório.
 
