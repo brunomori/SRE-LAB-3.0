@@ -24,83 +24,104 @@ O laboratório foi planejado para conectar infraestrutura, aplicações, dados, 
 
 ### Visão geral da solução
 
-A arquitetura é dividida em **três fluxos complementares**: (1) provisionar o cluster, (2) entregar versões da aplicação e (3) operar os ambientes com bancos de dados e observabilidade. O diagrama abaixo representa a **arquitetura-alvo**, não a confirmação de que todas as ferramentas já foram implantadas.
+A **arquitetura-alvo** separa o provisionamento do cluster, o ciclo de CI/CD e os serviços executados no Kubernetes. **Jenkins, Argo CD e a pilha principal de monitoramento ficam dentro do cluster**; GitHub e o registry de imagens continuam externos. O desenho representa a proposta de evolução, e não a instalação já concluída de todos os componentes.
 
 ```mermaid
 flowchart TB
-    subgraph INFRA["1. Provisionamento da infraestrutura local"]
+    subgraph BASE["1 · Provisionamento no host Ubuntu"]
         direction LR
-        HOST["Host Ubuntu"] --> VAGRANT["Vagrant + VirtualBox<br/>Criar e gerenciar VMs"]
-        VAGRANT --> VMS["VMs Linux<br/>Control planes e workers"]
-        VMS --> ANSIBLE["Ansible<br/>Preparar e configurar as VMs"]
-        ANSIBLE --> KUBESPRAY["Kubespray<br/>Instalar e configurar Kubernetes<br/>com Ansible"]
+        HOST["Host Ubuntu"] --> VAGRANT["Vagrant + VirtualBox"]
+        VAGRANT --> VMS["VMs Linux: control planes + workers"]
+        VMS --> ANSIBLE["Ansible: configuração das VMs"]
+        ANSIBLE --> KUBESPRAY["Kubespray: instalação Kubernetes via Ansible"]
     end
 
-    subgraph ENTREGA["2. Código, CI/CD e artefatos"]
+    subgraph EXTERNOS["2 · Integrações externas"]
         direction LR
-        GITHUB["GitHub<br/>Código, Dockerfile, charts Helm<br/>e configuração GitOps"] --> CI["Jenkins / GitHub Actions<br/>Build e testes"]
-        CI --> REGISTRY["Registry<br/>Imagens Docker versionadas"]
-        GITHUB --> HELM["Helm charts + values<br/>DEV / UAT / PROD"]
+        GHCODIGO["GitHub: código da aplicação + Dockerfile"]
+        GHGITOPS["GitHub: charts Helm + values / repositório GitOps"]
+        REGISTRY[("Container Registry: imagens versionadas (ex.: GHCR)")]
     end
 
-    subgraph CLUSTER["3. Cluster Kubernetes"]
+    subgraph K8S["3 · Cluster Kubernetes sobre as VMs"]
         direction TB
-        ARGO["Argo CD<br/>Sincronização declarativa com Helm"]
 
-        subgraph AMBIENTES["Aplicações e bancos isolados por namespace"]
+        subgraph CICD["Namespace cicd"]
+            direction TB
+            JENKINS["Jenkins Controller"] --> AGENTES["Agentes temporários em Pods: testes + build (BuildKit)"]
+        end
+
+        subgraph GITOPS["Namespace argocd"]
+            ARGO["Argo CD: entrega GitOps com Helm"]
+        end
+
+        subgraph AMBIENTES["Namespaces da aplicação"]
             direction LR
-            subgraph DEV["Namespace dev"]
+            subgraph DEV["dev"]
                 direction TB
-                APP_DEV["Aplicação DEV"] <--> DB_DEV[("Banco DEV<br/>PVC separado")]
+                APP_DEV["Aplicação DEV"] <--> DB_DEV[("Banco DEV + PVC")]
             end
-            subgraph UAT["Namespace uat"]
+            subgraph UAT["uat"]
                 direction TB
-                APP_UAT["Aplicação UAT"] <--> DB_UAT[("Banco UAT<br/>PVC separado")]
+                APP_UAT["Aplicação UAT"] <--> DB_UAT[("Banco UAT + PVC")]
             end
-            subgraph PROD["Namespace prod"]
+            subgraph PROD["prod"]
                 direction TB
-                APP_PROD["Aplicação PROD"] <--> DB_PROD[("Banco PROD<br/>PVC separado")]
+                APP_PROD["Aplicação PROD"] <--> DB_PROD[("Banco PROD + PVC")]
             end
         end
 
-        MONITORING["Namespace monitoring<br/>Prometheus + Grafana"]
+        subgraph OBS["Namespace monitoring"]
+            PROM["Prometheus: métricas e alertas"] --> GRAFANA["Grafana: dashboards"]
+        end
     end
 
-    OUTROS["Zabbix / Datadog<br/>Integrações de observabilidade"]
-    OPERACAO["Alertas, dashboards, troubleshooting<br/>runbooks e resposta a incidentes"]
+    EXT_OBS["Zabbix / Datadog: integrações futuras"]
+    SRE["Operação SRE: alertas, diagnóstico, incidentes e runbooks"]
 
-    KUBESPRAY --> CLUSTER
-    HELM --> ARGO
-    ARGO --> APP_DEV
-    ARGO --> APP_UAT
-    ARGO --> APP_PROD
-    REGISTRY -.-> APP_DEV
-    REGISTRY -.-> APP_UAT
-    REGISTRY -.-> APP_PROD
+    KUBESPRAY --> JENKINS
+    KUBESPRAY --> ARGO
+    KUBESPRAY --> APP_DEV
 
-    APP_DEV -.-> MONITORING
-    APP_UAT -.-> MONITORING
-    APP_PROD -.-> MONITORING
-    DB_DEV -.-> MONITORING
-    DB_UAT -.-> MONITORING
-    DB_PROD -.-> MONITORING
-    CLUSTER -.-> OUTROS
+    GHCODIGO -->|push / webhook| JENKINS
+    AGENTES -->|publica imagem| REGISTRY
+    AGENTES -->|atualiza versão em Git| GHGITOPS
+    GHGITOPS -->|estado desejado| ARGO
 
-    MONITORING --> OPERACAO
-    OUTROS --> OPERACAO
+    ARGO -->|sincroniza release Helm| APP_DEV
+    ARGO -->|sincroniza release Helm| APP_UAT
+    ARGO -->|sincroniza release Helm| APP_PROD
+
+    REGISTRY -.->|pull da imagem| APP_DEV
+    REGISTRY -.->|pull da imagem| APP_UAT
+    REGISTRY -.->|pull da imagem| APP_PROD
+
+    APP_DEV -.-> PROM
+    APP_UAT -.-> PROM
+    APP_PROD -.-> PROM
+    DB_DEV -.-> PROM
+    DB_UAT -.-> PROM
+    DB_PROD -.-> PROM
+    JENKINS -.-> PROM
+    ARGO -.-> PROM
+
+    PROM --> SRE
+    GRAFANA --> SRE
+    EXT_OBS -.-> SRE
 ```
 
-#### Como interpretar o fluxo
+#### Fluxo operacional
 
-1. **Provisionamento:** o **host Ubuntu** executa o Vagrant, que utiliza o **VirtualBox** para criar e gerenciar as VMs. O **Ansible** automatiza sua preparação; o **Kubespray** usa playbooks Ansible para instalar e configurar o **cluster Kubernetes**.
-2. **CI (integração contínua):** o código fica no **GitHub**. **Jenkins** e, numa etapa futura, **GitHub Actions**, executam build e testes e publicam imagens versionadas em um **registry**.
-3. **CD e GitOps (entrega):** os **charts Helm** e os valores por ambiente ficam versionados. O **Argo CD**, executando no Kubernetes, sincroniza o estado desejado e instala/atualiza os releases. **Helm é o mecanismo de empacotamento e implantação**, e não um servidor de pipeline.
-4. **Aplicação e banco:** cada namespace (`dev`, `uat`, `prod`) possui **sua aplicação conectada ao respectivo banco**, com persistência isolada por **PVC**. Nenhum ambiente deve usar o banco de outro.
-5. **Observabilidade transversal:** **Prometheus e Grafana** formam a camada compartilhada de métricas e dashboards (por exemplo, em `monitoring`); **Zabbix e Datadog** serão integrados progressivamente. O monitoramento abrange aplicações, bancos, Pods, nós e infraestrutura e alimenta alertas, diagnóstico e runbooks.
+1. **Preparação do ambiente:** no **Ubuntu**, o **Vagrant** usa o **VirtualBox** para criar as VMs. **Ansible** prepara os servidores, e **Kubespray** (baseado em Ansible) instala e configura o **cluster Kubernetes**.
+2. **CI dentro do Kubernetes:** um `git push` no **GitHub** aciona o **Jenkins Controller** no namespace `cicd`. Agentes efêmeros em Pods executam testes e constroem a imagem (por exemplo, com **BuildKit**, sem montar o socket Docker do host).
+3. **Imagens e configuração versionadas:** o pipeline publica a imagem em um **registry externo**, como **GHCR**, e atualiza a referência da versão no Git que contém os **charts Helm** e os valores de cada ambiente.
+4. **CD com GitOps:** o **Argo CD** no namespace `argocd` observa o estado desejado no Git e sincroniza os releases Helm. **Helm não é um serviço residente separado no cluster**: seus charts são processados pelo fluxo de entrega.
+5. **Três ambientes paralelos:** `dev`, `uat` e `prod` possuem cada um **uma aplicação e um banco próprios**, com conexão interna via **Service/DNS** e armazenamento persistente **PVC** independente. A promoção de versões entre ambientes será controlada pelo fluxo GitOps.
+6. **Observabilidade e resposta:** **Prometheus e Grafana**, no namespace `monitoring`, acompanham aplicações, bancos e componentes do cluster. **Zabbix/Datadog** entram como integrações posteriores; alertas e dashboards apoiam troubleshooting, runbooks e análise de incidentes.
 
-**Limites do desenho:** GitHub, registry e pipelines não precisam executar dentro do cluster. O Argo CD e os workloads podem rodar no cluster. Os ambientes `dev`, `uat` e `prod` são **namespaces de um cluster de laboratório**, sem equivalência automática com o isolamento de clusters independentes em produção. **Terraform/Terragrunt** entram em práticas de IaC à parte; não substituem o Vagrant no provisionamento local atualmente planejado.
+**Decisões arquiteturais:** os control planes e workers são VMs criadas no host; **Jenkins, agentes, Argo CD, workloads e monitoramento principal executam como recursos Kubernetes**. Já **GitHub e registry de imagens são serviços externos**. A aplicação **consome** as imagens do registry; as imagens não ficam armazenadas permanentemente no Jenkins. Os namespaces `dev`, `uat` e `prod` isolam recursos de um **único cluster de laboratório** e não substituem a segregação entre clusters para uma produção real. **Terraform/Terragrunt** serão estudados em uma frente de IaC complementar, sem substituir o provisionamento local com Vagrant nesta fase.
 
-> **Nota sobre a imagem acima:** o mapa de estudos é uma visão didática do roadmap. Este fluxograma descreve com mais precisão as dependências e os limites entre infraestrutura, pipeline de entrega, workloads e monitoramento.
+> A imagem do mapa de estudos acima ilustra o roadmap geral. **O fluxograma Mermaid é a referência da arquitetura técnica pretendida** e será ajustado à medida que cada componente for efetivamente implementado e validado.
 
 ## 🧰 Tecnologias previstas
 
