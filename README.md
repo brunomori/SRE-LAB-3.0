@@ -187,6 +187,7 @@ A topologia, os endereços, as versões e o estado das VMs podem mudar ao longo 
 O README principal descreve a **visão e os objetivos**. Os procedimentos executáveis ficam nas pastas numeradas e serão adicionados gradualmente, sem transformar esta apresentação em um manual de comandos.
 
 - [**Tema 01 — Iniciar o laboratório**](01-iniciar-laboratorio/README.md): guia de inicialização, acesso ao cluster, validação e desligamento.
+- [**Tema 02 — Automação do SRE LAB 3.0**](02-automacao-laboratorio/README.md): documentação do orquestrador Python, código revisado, etapas de execução, validação e troubleshooting.
 - **Próximos temas:** serão publicados conforme os estudos e as práticas evoluírem.
 
 O padrão de organização e publicação está em [SKILL.md](SKILL.md).
