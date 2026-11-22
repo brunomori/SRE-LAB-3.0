@@ -1,0 +1,12 @@
+---
+- name: Preparar Linux sem duplicar Kubespray
+  hosts: k8s_cluster
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: hostname
+      tags: [hostname]
+    - role: networking
+      tags: [networking]

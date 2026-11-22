@@ -1,0 +1,8 @@
+{
+  "solution": "A falha de teste impede publicação de forma esperada.",
+  "recovery": "Testes corrigidos e pipeline reproduzível, sem ignorar validação.",
+  "keywords": [
+    "teste",
+    "pipeline"
+  ]
+}

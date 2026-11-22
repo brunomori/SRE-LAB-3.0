@@ -1,0 +1,17 @@
+{
+  "id": "INC-002",
+  "level": "Básico",
+  "title": "ImagePullBackOff",
+  "alert": "Nova versão não fica disponível",
+  "impact": "Rollout bloqueado",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "event: Failed to pull image; manifest unknown",
+    "status: Waiting; versão esperada: release-42; catálogo fictício: release-41"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare a referência da imagem com a release registrada"
+  ]
+}

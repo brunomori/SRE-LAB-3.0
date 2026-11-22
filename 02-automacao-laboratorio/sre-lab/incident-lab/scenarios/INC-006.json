@@ -1,0 +1,17 @@
+{
+  "id": "INC-006",
+  "level": "Intermediário",
+  "title": "Ingress HTTP 502",
+  "alert": "Acesso externo retorna erro",
+  "impact": "Somente rota de chamados",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "proxy: status=502; upstream connection refused",
+    "service: backend port 8080; aplicação reporta porta 8081"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare rota, serviço e porta da aplicação"
+  ]
+}

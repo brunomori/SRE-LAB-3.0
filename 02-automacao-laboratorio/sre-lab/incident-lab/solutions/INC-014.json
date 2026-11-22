@@ -1,0 +1,8 @@
+{
+  "solution": "O tempo de espera do banco domina a latência observada.",
+  "recovery": "p95 retorna ao objetivo e hipótese é validada com evidências.",
+  "keywords": [
+    "latência",
+    "banco"
+  ]
+}

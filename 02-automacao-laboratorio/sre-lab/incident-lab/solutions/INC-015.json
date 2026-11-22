@@ -1,0 +1,8 @@
+{
+  "solution": "Uma dependência fictícia lenta afeta o caminho crítico.",
+  "recovery": "Dependência recuperada; erros e latência dentro do objetivo.",
+  "keywords": [
+    "dependência",
+    "timeout"
+  ]
+}

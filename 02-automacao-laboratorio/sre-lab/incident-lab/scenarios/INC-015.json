@@ -1,0 +1,17 @@
+{
+  "id": "INC-015",
+  "level": "Avançado",
+  "title": "Dependência externa simulada",
+  "alert": "Operações específicas apresentam timeout",
+  "impact": "Parte dos fluxos afetada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "log: chamada de catálogo fictício excede timeout",
+    "métricas: catálogo lento; demais endpoints normais"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Identifique escopo e comportamento de dependência"
+  ]
+}

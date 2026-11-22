@@ -1,0 +1,17 @@
+{
+  "id": "INC-004",
+  "level": "Básico",
+  "title": "Configuração inválida",
+  "alert": "Serviço não inicia após mudança",
+  "impact": "API indisponível",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "log: Configuração DATABASE_URL não encontrada",
+    "event: objeto de configuração esperado não localizado"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare dependências declaradas e configuração disponível"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "solution": "Histórico e estado do schema estão divergentes.",
+  "recovery": "Revisão de compatibilidade e validação de migration em cópia fictícia.",
+  "keywords": [
+    "migration",
+    "schema"
+  ]
+}

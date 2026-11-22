@@ -1,0 +1,624 @@
+#!/usr/bin/env python3
+"""Orquestrador local; nenhum comando usa o kubeconfig global."""
+import argparse
+import base64
+import datetime as dt
+import fcntl
+import hashlib
+import ipaddress as ip
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shlex
+import shutil
+import subprocess as sp
+import sys
+import tarfile
+import time
+import urllib.request
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL = ROOT / '.local'
+CFG = ROOT / 'config/lab.yml'
+VERS = json.loads((ROOT / 'config/versions.json').read_text())
+NODES = [f'master-{n}' for n in range(1,4)] + [f'worker-{n}' for n in range(1,3)]
+CP = NODES[:3]
+STAGES = ['host','bootstrap','vms','ssh','network','ansible','kubernetes','etcd','dns','metallb','ingress','storage']
+CHECKS = [s for s in STAGES if s != 'bootstrap']
+STAGE_MAP = {'preflight':1,'bootstrap':2,'provision':3,'prepare':6,'cluster':9,'kubeconfig':9,'addons':12,'install':12}
+ENV = dict(os.environ, SRE_LAB_RUN='1')
+for k in list(ENV):
+    if k.startswith(('ANSIBLE_', 'VAGRANT_', 'HELM_', 'KUBECONFIG')):
+        ENV.pop(k)
+ENV['VAGRANT_DEFAULT_PROVIDER']='virtualbox'
+ENV['VAGRANT_DOTFILE_PATH']=str(LOCAL/'vagrant-state')
+ENV['HELM_CONFIG_HOME']=str(LOCAL/'helm/config')
+ENV['HELM_CACHE_HOME']=str(LOCAL/'helm/cache')
+ENV['HELM_DATA_HOME']=str(LOCAL/'helm/data')
+for key in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'):
+    ENV.pop(key,None)
+
+class Block(Exception): pass
+class Health(Exception): pass
+class Incomplete(Exception): pass
+
+def require(cond, msg):
+    if not cond: raise Block(msg)
+
+def healthy(cond,msg):
+    if not cond: raise Health(msg)
+
+def load(p):
+    try: return json.loads(Path(p).read_text())
+    except (OSError,ValueError): raise Block(f'Arquivo ausente ou JSON inválido: {p}') from None
+
+def save(p,obj):
+    p=Path(p); p.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    tmp=p.with_name(p.name+'.tmp'); tmp.write_text(json.dumps(obj,indent=2,ensure_ascii=False)+'\n'); tmp.chmod(0o600); tmp.replace(p)
+
+def hash_bytes(data): return hashlib.sha256(data).hexdigest()
+
+def run(args, *, cwd=ROOT, timeout=120, capture=True, data=None, env=None):
+    try:
+        p=sp.run([str(a) for a in args],cwd=cwd,env=env or ENV,text=True,input=data,stdout=sp.PIPE if capture else None,stderr=sp.PIPE if capture else None,timeout=timeout,check=False)
+    except (OSError,sp.TimeoutExpired) as e: raise Block(f'Não foi possível executar {Path(str(args[0])).name}: {type(e).__name__}') from None
+    if p.returncode: raise Health(f'{Path(str(args[0])).name} retornou {p.returncode}; consulte o comando/estado local. Saída sensível omitida.')
+    return p.stdout if capture else ''
+
+def exact(d, keys, label):
+    require(isinstance(d,dict) and set(d)==set(keys),f'Chaves inválidas em {label}; consulte lab.example.yml')
+
+def config_validate(c, reviewed=True):
+    exact(c,['name','box','box_version','python','network_reviewed','compatibility_reviewed','network','nodes','timezone','min_free_disk_gib'],'config')
+    require(re.fullmatch(r'[a-z][a-z0-9-]{2,23}',c['name']) is not None,'Nome inválido')
+    require(c['box']=='ubuntu/jammy64','Somente box Ubuntu jammy64 previsto neste MVP')
+    require(re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}',c['box_version']) is not None,'Preencha box_version com versão oficial verificada')
+    require(re.fullmatch(r'python3\.(11|12|13)',c['python']) is not None,'Selecione Python 3.11–3.13')
+    require(isinstance(c['network_reviewed'],bool) and isinstance(c['compatibility_reviewed'],bool),'Flags devem ser booleanas')
+    if reviewed: require(c['network_reviewed'] and c['compatibility_reviewed'],'Revise a rede e a compatibilidade, depois marque as duas flags true')
+    require(type(c['min_free_disk_gib']) is int and c['min_free_disk_gib']>=40,'Margem de disco mínima 40 GiB')
+    require(re.fullmatch(r'[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*',c['timezone']) is not None and Path('/usr/share/zoneinfo',c['timezone']).is_file(),'Timezone inválido')
+    n=c['network']; exact(n,['subnet','vip','pool_start','pool_end','pods','services','domain'],'network')
+    nets=[ip.IPv4Network(n[k]) for k in ('subnet','pods','services')]
+    require(nets[0].prefixlen==24 and nets[0].is_private,'Rede local IPv4 privada /24 obrigatória')
+    require(nets[1].prefixlen<=21 and nets[2].prefixlen<=24,'CIDRs de Pods/Services pequenos demais')
+    require(all(x.is_private for x in nets),'CIDRs devem ser privados')
+    require(not any(a.overlaps(b) for i,a in enumerate(nets) for b in nets[i+1:]),'CIDRs sobrepostos')
+    exact(c['nodes'],NODES,'nodes'); addrs=[]
+    for name in NODES:
+        d=c['nodes'][name]; exact(d,['ip','cpu','memory','disk'],name)
+        require(all(type(d[k]) is int for k in ('cpu','memory','disk')),'Recursos devem ser inteiros')
+        require(2<=d['cpu']<=8 and (3072 if name in CP else 4096)<=d['memory']<=16384 and d['disk']>=30,'Recursos do nó fora do limite')
+        addrs.append(ip.IPv4Address(d['ip']))
+    vip,start,end=[ip.IPv4Address(n[k]) for k in ('vip','pool_start','pool_end')]
+    reserved={nets[0].network_address,nets[0].broadcast_address,nets[0].network_address+1}
+    require(all(a in nets[0] and a not in reserved for a in addrs+[vip,start,end]),'IP fora da subnet ou reservado')
+    require(len(set(addrs+[vip]))==6,'IPs duplicados')
+    require(start<=end and int(end)-int(start)>=2 and not any(start<=a<=end for a in addrs+[vip]),'Pool MetalLB inválido ou sobreposto')
+    require(re.fullmatch(r'[a-z0-9-]+(?:\.[a-z0-9-]+)*\.test',n['domain']) is not None,'Domínio deve terminar em .test')
+    return c
+
+def config():
+    try: return config_validate(load(CFG))
+    except (TypeError,ValueError,KeyError): raise Block('Configuração inválida; use o exemplo') from None
+
+def fingerprint(c): return hash_bytes(json.dumps({'config':c,'versions':VERS},sort_keys=True).encode())
+
+def state(c, create=False):
+    p=LOCAL/'identity.json'
+    if not p.exists():
+        require(create,'Identidade local ausente. Execute bootstrap; não adote recursos existentes.')
+        require(not (LOCAL/'vagrant-state').exists() or not list((LOCAL/'vagrant-state').rglob('id')),'Estado Vagrant órfão; não adotar')
+        s={'id':str(uuid.uuid4()),'config':fingerprint(c),'vms':{},'interfaces':[],'cluster_attempted':False}
+        save(p,s)
+    s=load(p); require(s['config']==fingerprint(c),'Configuração mudou após registro; migração manual necessária')
+    return s
+
+def write_state(s): save(LOCAL/'identity.json',s)
+
+def vagrant(*args, **kw): return run(['vagrant',*args],cwd=ROOT/'vagrant',**kw)
+
+def vbox_vms():
+    return {name:uid for name,uid in re.findall(r'^"(.*)" \{([0-9a-f-]+)\}$',run(['VBoxManage','list','vms']),re.M)}
+
+def vagrant_id(node):
+    p=LOCAL/'vagrant-state'/'machines'/node/'virtualbox'/'id'
+    return p.read_text().strip() if p.is_file() else None
+
+def vm_info(uid):
+    return dict(line.split('=',1) for line in run(['VBoxManage','showvminfo',uid,'--machinereadable']).splitlines() if '=' in line)
+
+def owned(c,s,all_required=False,running=False):
+    actual=vbox_vms()
+    for node in NODES:
+        name=c['name']+'-'+node; vid=vagrant_id(node); uid=s['vms'].get(node)
+        if uid:
+            require(actual.get(name)==uid==vid,'Identidade VM divergente: '+node)
+            info=vm_info(uid)
+            require(info.get('nic2')=='"hostonly"' and info.get('hostonlyadapter2','').strip('"') in s['interfaces'],'Rede da VM não corresponde ao registro')
+            require(info.get('name')==json.dumps(name),'Nome VM divergente')
+            if running: require(info.get('VMState')=='"running"',node+' não está ligada')
+        else:
+            require(name not in actual and vid is None,'VM não registrada: '+node+'; não adotar')
+            require(not all_required,'VM ainda não provisionada: '+node)
+    return actual
+
+def host_check(c, min_free_disk_gib=None):
+    require(os.geteuid()!=0,'Execute com usuário normal, não root')
+    require(platform.system()=='Linux' and platform.machine()=='x86_64','Host Linux x86_64 obrigatório')
+    require('ID=ubuntu' in Path('/etc/os-release').read_text(),'Host Ubuntu obrigatório')
+    for cmd in ('VBoxManage','vagrant','git','ssh','ssh-keyscan','ssh-keygen','ip','curl','make',c['python']): require(shutil.which(cmd),f'Instale {cmd} pelo procedimento oficial')
+    pv=run([c['python'],'-c','import sys; print("%s.%s" % sys.version_info[:2])']).strip(); require(pv in ('3.11','3.12','3.13'),'Python incompatível')
+    require(Path('/dev/vboxdrv').exists(),'Driver VirtualBox indisponível')
+    require(os.access('/dev/vboxdrvu',os.R_OK|os.W_OK),'Sem acesso ao driver VirtualBox')
+    run(['VBoxManage','--version']); run(['vagrant','--version'])
+    s=state(c) if (LOCAL/'identity.json').exists() else {'vms':{},'interfaces':[]}
+    owned(c,s)
+    available=int(re.search(r'^MemAvailable:\s+(\d+)',Path('/proc/meminfo').read_text(),re.M)[1])//1024
+    pending=sum(c['nodes'][n]['memory'] for n in NODES if n not in s['vms'] or vm_info(s['vms'][n]).get('VMState')!='"running"')
+    require(available>=pending+4096,f'RAM disponível {available} MiB; precisa de {pending+4096} MiB incluindo margem')
+    # Verifica filesystem do projeto e diretório de VMs configurado pelo hypervisor.
+    base=Path.home(); props=run(['VBoxManage','list','systemproperties'])
+    m=re.search(r'^Default machine folder:\s*(.+)$',props,re.M)
+    require(m is not None,'Não foi possível identificar pasta de VMs do VirtualBox')
+    base=Path(m[1].strip()).expanduser()
+    while not base.exists() and base!=base.parent: base=base.parent
+    required_disk = c['min_free_disk_gib'] if min_free_disk_gib is None else min_free_disk_gib
+    for path in (ROOT,base): require(shutil.disk_usage(path).free>=required_disk*1024**3,'Espaço livre insuficiente: '+str(path))
+    nets=[ip.IPv4Network(c['network'][k]) for k in ('subnet','pods','services')]
+    for r in json.loads(run(['ip','-j','-4','route','show','table','all'])):
+        dst=r.get('dst','default')
+        if dst=='default': continue
+        try: net=ip.IPv4Network(dst,strict=False)
+        except ValueError: continue
+        for i,target in enumerate(nets):
+            if net.overlaps(target):
+                require(i==0 and r.get('dev') in s['interfaces'] and net.subnet_of(target),f'Conflito de rota: {dst} em {r.get("dev")}')
+    # Não adotar uma rede host-only preexistente, mesmo se não tiver rota no host.
+    for block in run(['VBoxManage','list','hostonlyifs']).split('\n\n'):
+        addr=re.search(r'^IPAddress:\s*(\S+)',block,re.M); mask=re.search(r'^NetworkMask:\s*(\S+)',block,re.M); name=re.search(r'^Name:\s*(\S+)',block,re.M)
+        if addr and mask and name:
+            try: network=ip.IPv4Network(f'{addr[1]}/{mask[1]}',strict=False)
+            except ValueError: continue
+            if network.overlaps(nets[0]): require(name[1] in s['interfaces'],'Rede host-only preexistente: '+name[1])
+    return f'Host verificado; RAM livre {available} MiB; revisão manual de DHCP/VPN ainda necessária'
+
+def authorize(c,action):
+    require(sys.stdin.isatty(),'Autorização interativa obrigatória')
+    print(f'Projeto {c["name"]}: {action}. Destino {c["network"]["subnet"]}. Nenhum cluster externo.')
+    require(input(f'Digite {c["name"]} para autorizar: ')==c['name'],'Operação não autorizada')
+
+def download(url,dst,sha=None):
+    dst=Path(dst); dst.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if not dst.exists():
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url,timeout=60) as r: content=r.read(100*1024**2+1)
+        except Exception as e: raise Block(f'Download falhou: {url} ({type(e).__name__})') from None
+        require(len(content)<=100*1024**2,'Download excedeu limite')
+        if sha: require(hash_bytes(content)==sha,'Checksum divergente: '+dst.name)
+        dst.write_bytes(content)
+    if sha: require(hash_bytes(dst.read_bytes())==sha,'Checksum cache divergente: '+dst.name)
+    return dst
+
+def ansible_env(which):
+    e=dict(ENV); e['PATH']=str(LOCAL/which/'bin')+os.pathsep+e.get('PATH',''); e['ANSIBLE_HOST_KEY_CHECKING']='True'; e['ANSIBLE_CACHE_PLUGIN']='memory'; e['ANSIBLE_LOCAL_TEMP']=str(LOCAL/'ansible-tmp'); e['ANSIBLE_SSH_ARGS']='-o ControlMaster=no -o StrictHostKeyChecking=yes'; e['ANSIBLE_CONFIG']=str(ROOT/'ansible/ansible.cfg') if which=='ansible' else str(LOCAL/'upstream/ansible.cfg'); e['ANSIBLE_ROLES_PATH']=str(ROOT/'ansible/roles') if which=='ansible' else str(LOCAL/'upstream/roles'); return e
+
+def bootstrap(c):
+    host_check(c); s=state(c,True)
+    if (LOCAL/'artifacts.json').exists():
+        bootstrap_check(); print('Bootstrap já concluído; artefatos preservados.'); return
+    upstream=LOCAL/'upstream'
+    if not upstream.exists(): run(['git','clone','--depth','1','--branch',VERS['kubespray'],'https://github.com/kubernetes-sigs/kubespray.git',upstream],timeout=600,capture=False)
+    require(run(['git','rev-parse','HEAD'],cwd=upstream).strip()==VERS['commit'],'Commit upstream divergente')
+    require(not run(['git','status','--porcelain','--untracked-files=no'],cwd=upstream).strip(),'Upstream modificado')
+    for name,req in [('ansible',ROOT/'ansible/requirements.txt'),('kubespray',upstream/'requirements.txt')]:
+        envdir=LOCAL/name
+        if not (envdir/'bin/python').exists(): run([c['python'],'-m','venv',envdir],timeout=300,capture=False)
+        run([envdir/'bin/python','-m','pip','install','-r',req],timeout=1800,capture=False)
+        run([envdir/'bin/python','-m','pip','check'])
+        freeze=run([envdir/'bin/python','-m','pip','freeze']); (LOCAL/(name+'-resolved.txt')).write_text(freeze)
+    b=LOCAL/'bin'; b.mkdir(exist_ok=True)
+    kubever='v'+VERS['kubernetes']; url=f'https://dl.k8s.io/release/{kubever}/bin/linux/amd64/kubectl'
+    digest=download(url+'.sha256',LOCAL/'downloads/kubectl.sha256').read_text().strip()
+    require(re.fullmatch('[a-f0-9]{64}',digest),'Checksum kubectl inválido'); download(url,b/'kubectl',digest).chmod(0o700)
+    helm=download(f'https://get.helm.sh/helm-{VERS["helm"]}-linux-amd64.tar.gz',LOCAL/'downloads/helm.tgz',VERS['helm_sha256'])
+    with tarfile.open(helm) as t:
+        (b/'helm').write_bytes(t.extractfile('linux-amd64/helm').read()); (b/'helm').chmod(0o700)
+    download(f'https://raw.githubusercontent.com/metallb/metallb/{VERS["metallb"]}/config/manifests/metallb-native.yaml',LOCAL/'downloads/metallb.yml')
+    download(f'https://raw.githubusercontent.com/rancher/local-path-provisioner/{VERS["local_path"]}/deploy/local-path-storage.yaml',LOCAL/'downloads/storage.yml')
+    # Helm fetch + render only in project cache; no cluster contact.
+    chart=LOCAL/'downloads'/f'traefik-{VERS["traefik_chart"]}.tgz'
+    if not chart.exists(): run([b/'helm','pull','traefik','--repo','https://traefik.github.io/charts','--version',VERS['traefik_chart'],'--destination',LOCAL/'downloads'],timeout=300)
+    chart=LOCAL/'downloads'/f'traefik-{VERS["traefik_chart"]}.tgz'
+    rendered=run([b/'helm','template','traefik',chart,'--namespace','traefik','--kube-version',VERS['kubernetes'],'--include-crds','-f',ROOT/'addons/ingress/values.yml'],timeout=180)
+    require(rendered.strip(),'Chart render vazio')
+    save(LOCAL/'artifacts.json',{p.name:hash_bytes(p.read_bytes()) for p in (LOCAL/'downloads').iterdir() if p.is_file()})
+    print('Bootstrap concluído; dependências locais isoladas.')
+
+def bootstrap_check():
+    for p in [LOCAL/'bin/kubectl',LOCAL/'bin/helm',LOCAL/'upstream/cluster.yml',LOCAL/'ansible/bin/ansible-playbook',LOCAL/'kubespray/bin/ansible-playbook',LOCAL/'artifacts.json']: require(p.is_file(),f'Bootstrap incompleto: {p.name}')
+    for n,d in load(LOCAL/'artifacts.json').items(): require(hash_bytes((LOCAL/'downloads'/n).read_bytes())==d,'Artefato alterado: '+n)
+    require(run(['git','rev-parse','HEAD'],cwd=LOCAL/'upstream').strip()==VERS['commit'],'Commit upstream divergente')
+    require(not run(['git','status','--porcelain','--untracked-files=no'],cwd=LOCAL/'upstream').strip(),'Upstream modificado')
+    return 'Artefatos locais disponíveis e hash local consistente'
+
+def provision(c):
+    host_check(c); bootstrap_check(); s=state(c); owned(c,s)
+    for n in NODES:
+        if n in s['vms']:
+            if vm_info(s['vms'][n]).get('VMState')!='"running"': vagrant('up',n,'--no-provision',capture=False,timeout=1800)
+            continue
+        # Registrar imediatamente após criação; falha parcial bloqueia adoção.
+        vagrant('up',n,'--provider=virtualbox','--no-provision',capture=False,timeout=1800)
+        uid=vagrant_id(n); require(uid and vbox_vms().get(c['name']+'-'+n)==uid,'VM nova não identificável')
+        info=vm_info(uid); require(info.get('nic2')=='"hostonly"','NIC host-only não identificada')
+        iface=info.get('hostonlyadapter2','').strip('"'); require(iface,'Interface host-only ausente')
+        s['vms'][n]=uid
+        if iface not in s['interfaces']: s['interfaces'].append(iface)
+        write_state(s)
+    owned(c,s,True,True)
+    print('VMs registradas. Confira fingerprints SSH por console VirtualBox antes da próxima etapa.')
+
+def ssh_config(n):
+    out=vagrant('ssh-config',n); d={}
+    for line in out.splitlines():
+        fields=shlex.split(line)
+        if len(fields)==2: d[fields[0]]=fields[1]
+    require(d.get('HostName')=='127.0.0.1' and d.get('User')=='vagrant','SSH não está em loopback/usuário esperado')
+    key=Path(d.get('IdentityFile','')).resolve(); require(key.is_file() and LOCAL.resolve() in key.parents,'Chave SSH fora do estado privado')
+    require(int(d.get('Port','0'))>0,'Porta SSH inválida'); return d
+
+def trust_ssh(c,s, enroll=False):
+    owned(c,s,True,True); known=LOCAL/'known_hosts'; fpfile=LOCAL/'ssh-fingerprints.json'
+    fps=load(fpfile) if fpfile.exists() else {}
+    lines=[]
+    for n in NODES:
+        d=ssh_config(n); port=d['Port']; scan=run(['ssh-keyscan','-T','5','-t','ed25519',c['nodes'][n]['ip']]).strip()
+        # O fingerprint deve ser comparado com o console da VM, não com o scan.
+        got=run(['ssh-keygen','-lf','-'],data=scan+'\n').split()[1]
+        if n not in fps:
+            require(enroll and sys.stdin.isatty(),'Fingerprint não registrado; execute make prepare interativamente')
+            print(f'{n}: via console da VM própria execute ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')
+            expected=input('Digite o fingerprint SHA256 exibido no console: ').strip()
+            require(expected==got,'Fingerprint não coincide; interrompido')
+            fps[n]=expected; save(fpfile,fps)
+        require(fps[n]==got,'Host key alterada: '+n)
+        lines.extend(scan.splitlines())
+    if enroll:
+        known.write_text('\n'.join(lines)+'\n'); known.chmod(0o600)
+    else: require(known.is_file() and set(known.read_text().splitlines())==set(lines),'known_hosts divergente; execute prepare somente após revisar portas')
+    return 'Cinco host keys verificadas'
+
+def ssh(n,*args, capture=True,timeout=90):
+    d=ssh_config(n); address=config()['nodes'][n]['ip']
+    return run(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o',f'UserKnownHostsFile={LOCAL/"known_hosts"}','-o','GlobalKnownHostsFile=/dev/null','-o','IdentitiesOnly=yes','-o','ConnectTimeout=8','-p','22','-i',d['IdentityFile'],'vagrant@'+address,shlex.join(args)],capture=capture,timeout=timeout)
+
+def network_check(c):
+    interfaces=set()
+    for n in NODES:
+        addr=c['nodes'][n]['ip']; info=json.loads(ssh(n,'ip','-j','-4','addr','show'))
+        matches=[i['ifname'] for i in info if any(a.get('local')==addr and a.get('prefixlen')==24 for a in i.get('addr_info',[]))]
+        require(len(matches)==1,'IP da VM não corresponde: '+n); interfaces.add(matches[0])
+        for peer in NODES:
+            if peer!=n: ssh(n,'ping','-c','1','-W','2',c['nodes'][peer]['ip'])
+    require(len(interfaces)==1,'Interfaces internas diferentes; revisar suporte kube-vip')
+    return interfaces.pop()
+
+def generate_inventory(c,iface):
+    hosts={}
+    for n in NODES:
+        d=ssh_config(n); addr=c['nodes'][n]['ip']
+        hosts[n]={'ansible_host':addr,'ansible_port':22,'ansible_user':'vagrant','ansible_ssh_private_key_file':d['IdentityFile'],'ansible_become':True,'ansible_ssh_common_args':f'-o StrictHostKeyChecking=yes -o UserKnownHostsFile={shlex.quote(str(LOCAL/"known_hosts"))} -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes','ip':addr,'access_ip':addr}
+    inv={'all':{'hosts':hosts,'children':{'kube_control_plane':{'hosts':{n:{} for n in CP}},'kube_node':{'hosts':{n:{} for n in NODES[3:]}},'etcd':{'hosts':{n:{} for n in CP}},'k8s_cluster':{'children':{'kube_control_plane':{},'kube_node':{}}}}}}
+    common={'lab_timezone':c['timezone']}
+    network=c['network']; kvars={**common,'kube_version':VERS['kubernetes'],'container_manager':'containerd','kube_network_plugin':'calico','calico_ip_auto_method':f'interface=^{iface}$','calico_network_backend':'vxlan','calico_ipip_mode':'Never','calico_vxlan_mode':'Always','calico_veth_mtu':1450,'kube_pods_subnet':network['pods'],'kube_service_addresses':network['services'],'kube_proxy_mode':'iptables','kube_proxy_strict_arp':True,'dns_mode':'coredns','kube_vip_enabled':True,'kube_vip_arp_enabled':True,'kube_vip_controlplane_enabled':True,'kube_vip_services_enabled':False,'kube_vip_address':network['vip'],'kube_vip_interface':iface,'loadbalancer_apiserver':{'address':network['vip'],'port':6443},'supplementary_addresses_in_ssl_keys':[network['vip']],'metallb_enabled':False,'local_path_provisioner_enabled':False,'helm_enabled':False,'metrics_server_enabled':False,'argocd_enabled':False,'cert_manager_enabled':False,'kubeconfig_localhost':False}
+    for kind,vars_ in [('ansible',common),('kubespray',kvars)]:
+        folder=LOCAL/'inventory'/kind; save(folder/'hosts.yml',inv); save(folder/'group_vars/all.yml',vars_)
+
+def play(kind,file,timeout=1200):
+    cwd=ROOT/'ansible' if kind=='ansible' else LOCAL/'upstream'
+    run([LOCAL/kind/'bin/ansible-playbook','-i',LOCAL/'inventory'/kind/'hosts.yml',file],cwd=cwd,env=ansible_env(kind),timeout=timeout,capture=False)
+
+def prepare(c):
+    s=state(c); bootstrap_check(); trust_ssh(c,s,True); iface=network_check(c); generate_inventory(c,iface)
+    for p in ('preflight','prepare','verify'): play('ansible',f'playbooks/{p}.yml')
+    print('Preparação Linux validada.')
+
+def kpath(): return LOCAL/'sre-lab.kubeconfig'
+
+def kraw(*args,config_path=None,data=None,timeout=120):
+    return run([LOCAL/'bin/kubectl','--kubeconfig',config_path or kpath(),*(['--context',config()['name']] if config_path is None else []),'--request-timeout=25s',*args],data=data,timeout=timeout)
+
+def kjson(*args,**kw): return json.loads(kraw(*args,'-o','json',**kw))
+
+def cluster_signature(c,path):
+    view=json.loads(kraw('config','view','--raw','--minify','--flatten','-o','json',config_path=path))
+    require(len(view['clusters'])==1 and len(view['contexts'])==1,'Kubeconfig ambíguo')
+    entry=view['clusters'][0]['cluster']; require(entry['server']==f'https://{c["network"]["vip"]}:6443' and not entry.get('insecure-skip-tls-verify') and not entry.get('proxy-url'),'Endpoint ou TLS incorreto')
+    ca=hash_bytes(base64.b64decode(entry['certificate-authority-data'])); uid=kjson('get','namespace','kube-system',config_path=path)['metadata']['uid']
+    return {'ca':ca,'uid':uid,'context':view['current-context'],'endpoint':entry['server']}
+
+def guard(c):
+    s=state(c); owned(c,s,True,True); require(kpath().is_file() and 'cluster' in s,'Cluster não registrado'); require(cluster_signature(c,kpath())==s['cluster'],'Identidade do cluster não corresponde'); return s
+
+def register(c):
+    s=state(c); trust_ssh(c,s)
+    if 'cluster' in s: guard(c); return
+    require(s.get('cluster_attempted'),'Instalação não iniciada pelo projeto')
+    require(not kpath().exists(),'Kubeconfig órfão; não sobrescrever')
+    # Obtém configuração exclusivamente pelo SSH cuja chave já foi confirmada.
+    raw=ssh('master-1','sudo','cat','/etc/kubernetes/admin.conf'); tmp=LOCAL/'admin-tmp.kubeconfig'; tmp.write_text(raw); tmp.chmod(0o600)
+    try:
+        view=json.loads(kraw('config','view','--raw','--minify','--flatten','-o','json',config_path=tmp)); entry=view['clusters'][0]; entry['cluster']['server']=f'https://{c["network"]["vip"]}:6443'
+        context=view['contexts'][0]; context['name']=c['name']; view['current-context']=c['name']; save(tmp,view)
+        sig=cluster_signature(c,tmp)
+        # O endpoint VIP deve responder pelo mesmo cluster que o master próprio.
+        direct=json.loads(tmp.read_text()); direct['clusters'][0]['cluster']['server']='https://'+c['nodes']['master-1']['ip']+':6443'
+        dp=LOCAL/'direct-tmp.kubeconfig'; save(dp,direct)
+        try: require(kjson('get','namespace','kube-system',config_path=dp)['metadata']['uid']==sig['uid'],'UID do VIP não corresponde ao master')
+        finally: dp.unlink(missing_ok=True)
+        tmp.replace(kpath()); s['cluster']=sig; write_state(s)
+    finally: tmp.unlink(missing_ok=True)
+
+def deploy_cluster(c):
+    s=state(c); bootstrap_check(); trust_ssh(c,s); iface=network_check(c); generate_inventory(c,iface)
+    if 'cluster' in s:
+        guard(c); cluster_check(c); print('Cluster saudável; não reinstalado.'); return
+    if s.get('cluster_attempted'):
+        # Não repetir playbook parcial cegamente; primeiro tentar registro de cluster completo.
+        try: register(c); cluster_check(c); return
+        except (Block,Health): raise Block('Instalação anterior incompleta. Revise docs/troubleshooting.md; não haverá reset ou reaplicação automática.') from None
+    for n in NODES: require(ssh(n,'sudo','sh','-c','test ! -e /etc/kubernetes/admin.conf && test ! -e /etc/kubernetes/kubelet.conf && test ! -e /var/lib/etcd/member; echo $?').strip()=='0','Indício de cluster preexistente: '+n)
+    s['cluster_attempted']=True; write_state(s)
+    play('kubespray','cluster.yml',timeout=7200); register(c); cluster_check(c)
+
+def cluster_check(c):
+    guard(c); healthy(kraw('get','--raw=/readyz').strip()=='ok','API não pronta')
+    nodes=kjson('get','nodes')['items']; healthy(set(n['metadata']['name'] for n in nodes)==set(NODES),'Nós esperados divergentes')
+    for n in nodes:
+        name=n['metadata']['name']; healthy(any(x['type']=='Ready' and x['status']=='True' for x in n['status']['conditions']),name+' não Ready')
+        healthy(n['status']['nodeInfo']['containerRuntimeVersion'].startswith('containerd://'),name+' runtime incorreto')
+        healthy(n['status']['nodeInfo']['kubeletVersion']=='v'+VERS['kubernetes'],name+' versão kubelet divergente')
+        healthy((name in CP)==('node-role.kubernetes.io/control-plane' in n['metadata']['labels']),name+' função divergente')
+        healthy(any(a['type']=='InternalIP' and a['address']==c['nodes'][name]['ip'] for a in n['status']['addresses']),name+' InternalIP divergente')
+    rollout('kube-system','daemonset/calico-node')
+    vip_pods=kjson('-n','kube-system','get','pods')['items']; running={p['spec'].get('nodeName') for p in vip_pods if p['metadata']['name'].startswith('kube-vip-') and p['status']['phase']=='Running'}; healthy(set(CP).issubset(running),'kube-vip não está Running nos três CP')
+    for n in CP:
+        healthy(kraw('--server=https://'+c['nodes'][n]['ip']+':6443','get','--raw=/readyz').strip()=='ok','API backend não pronta: '+n)
+    return '5/5 Ready, API TLS/VIP e três backends, Calico disponíveis; failover real não testado'
+
+def rollout(ns,obj): kraw('-n',ns,'rollout','status',obj,'--timeout=90s',timeout=120)
+
+def etcd_check(c):
+    guard(c); trust_ssh(c,state(c))
+    # Kubespray fornece etcdctl e variáveis TLS em /etc/etcd.env; nunca imprimir credenciais.
+    cmd='set -a; . /etc/etcd.env; set +a; export ETCDCTL_API=3; etcdctl endpoint health --cluster -w json; etcdctl member list -w json'
+    # Use flags explícitos se o ambiente não exportar ETCDCTL_*; Kubespray usualmente os exporta via etcd.env.
+    out=ssh('master-1','sudo','bash','-ec',cmd); lines=[json.loads(l) for l in out.splitlines() if l.startswith(('[','{'))]
+    healthy(len(lines)==2 and len(lines[0])==3 and all(x.get('health') for x in lines[0]) and len(lines[1].get('members',[]))==3,'etcd não confirmou três membros saudáveis')
+    return '3 membros etcd saudáveis'
+
+def dns_check(c): guard(c); rollout('kube-system','deployment/coredns'); return 'CoreDNS disponível (resolução funcional exige modo ativo)'
+
+def metallb_check(c):
+    guard(c); rollout('metallb-system','deployment/controller'); rollout('metallb-system','daemonset/speaker'); pool=kjson('-n','metallb-system','get','ipaddresspool','sre-pool'); healthy(pool['spec']['addresses']==[c['network']['pool_start']+'-'+c['network']['pool_end']],'Pool divergente'); kraw('-n','metallb-system','get','l2advertisement','sre-l2'); return 'MetalLB disponível e pool correto'
+
+def ingress_check(c):
+    guard(c); rollout('traefik','deployment/traefik'); kraw('get','ingressclass','traefik'); svc=kjson('-n','traefik','get','svc','traefik'); addresses=svc['status'].get('loadBalancer',{}).get('ingress',[]); healthy(any('ip' in a and ip.IPv4Address(c['network']['pool_start'])<=ip.IPv4Address(a['ip'])<=ip.IPv4Address(c['network']['pool_end']) for a in addresses),'Traefik sem IP do pool'); return 'Traefik e endereço de LoadBalancer disponíveis'
+
+def storage_check(c):
+    guard(c); rollout('local-path-storage','deployment/local-path-provisioner'); classes=kjson('get','storageclass')['items']; default=[x for x in classes if x['metadata'].get('annotations',{}).get('storageclass.kubernetes.io/is-default-class')=='true']; healthy(len(default)==1 and default[0]['metadata']['name']=='sre-local' and default[0]['reclaimPolicy']=='Retain' and default[0]['volumeBindingMode']=='WaitForFirstConsumer','StorageClass padrão divergente'); return 'Provisionador e StorageClass Retain disponíveis'
+
+def apply_objects(c,objs):
+    guard(c); kraw('apply','-f','-',data=json.dumps({'apiVersion':'v1','kind':'List','items':objs}))
+
+def addons(c):
+    guard(c); bootstrap_check(); s=state(c)
+    if s.get('addons_complete'):
+        for fn in (metallb_check,ingress_check,storage_check): fn(c)
+        print('Add-ons já instalados; não reaplicar.'); return
+    if not s.get('addons_attempted'):
+        for ns in ('metallb-system','local-path-storage','traefik'):
+            require(not kraw('get','ns',ns,'--ignore-not-found').strip(),'Namespace de add-on preexistente: '+ns)
+        s['addons_attempted']=True; write_state(s)
+    else: raise Block('Add-ons parcialmente instalados; revise o estado e docs/troubleshooting.md antes de prosseguir.')
+    for name in ('metallb','storage'):
+        guard(c); source=LOCAL/'downloads'/f'{name}.yml'
+        if name=='storage':
+            content=source.read_text(); old='image: docker.io/library/busybox\n'; require(content.count(old)==1,'Helper image upstream inesperada'); content=content.replace(old,'image: docker.io/library/'+VERS['test_image']+'\n'); kraw('apply','-f','-',data=content,timeout=240)
+        else: kraw('apply','-f',source,timeout=240)
+    kraw('wait','--for=condition=Established','crd/ipaddresspools.metallb.io','crd/l2advertisements.metallb.io','--timeout=90s',timeout=120)
+    rollout('metallb-system','deployment/controller'); rollout('metallb-system','daemonset/speaker')
+    ns={'namespace':'metallb-system'}; pool=c['network']['pool_start']+'-'+c['network']['pool_end']
+    apply_objects(c,[{'apiVersion':'metallb.io/v1beta1','kind':'IPAddressPool','metadata':{**ns,'name':'sre-pool'},'spec':{'addresses':[pool]}},{'apiVersion':'metallb.io/v1beta1','kind':'L2Advertisement','metadata':{**ns,'name':'sre-l2'},'spec':{'ipAddressPools':['sre-pool'],'interfaces':state_interface(c)}}])
+    guard(c); kraw('apply','-f',ROOT/'addons/storage/classes.yml')
+    guard(c); chart=LOCAL/'downloads'/f'traefik-{VERS["traefik_chart"]}.tgz'
+    run([LOCAL/'bin/helm','--kubeconfig',kpath(),'--kube-context',c['name'],'install','traefik',chart,'--namespace','traefik','--create-namespace','-f',ROOT/'addons/ingress/values.yml','--wait','--timeout','5m'],timeout=360,capture=False)
+    for fn in (metallb_check,ingress_check,storage_check): fn(c)
+    s['addons_complete']=True; write_state(s)
+
+def state_interface(c): return [network_check(c)]
+
+def active_tests(c):
+    """Benign functional checks, only in a fresh namespace of the verified lab."""
+    guard(c); ns='sre-check-'+uuid.uuid4().hex[:12]; owner=ns; created=False; uid=None
+    labels={'sre-lab/session':owner}; marker='sre-lab-ok'; image='docker.io/library/'+VERS['test_image']
+    def obj(api,kind,name,spec=None,**extra):
+        d={'apiVersion':api,'kind':kind,'metadata':{'name':name,'namespace':ns,'labels':labels},**extra}
+        if spec is not None: d['spec']=spec
+        return d
+    def create(items):
+        guard(c); kraw('create','-f','-',data=json.dumps({'apiVersion':'v1','kind':'List','items':items}))
+    def pod(name,node,cmd,volume=False):
+        ct={'name':'test','image':image,'command':['sh','-ec',cmd],'resources':{'requests':{'cpu':'20m','memory':'32Mi'},'limits':{'cpu':'100m','memory':'64Mi'}},'securityContext':{'allowPrivilegeEscalation':False,'capabilities':{'drop':['ALL']},'runAsNonRoot':True,'runAsUser':10001,'seccompProfile':{'type':'RuntimeDefault'}}}
+        ps={'automountServiceAccountToken':False,'nodeSelector':{'kubernetes.io/hostname':node},'restartPolicy':'Never','containers':[ct],'activeDeadlineSeconds':600}
+        if volume:
+            ct['volumeMounts']=[{'name':'data','mountPath':'/data'}]; ps['volumes']=[{'name':'data','persistentVolumeClaim':{'claimName':'data'}}]; ps['securityContext']={'fsGroup':10001}
+        return obj('v1','Pod',name,ps)
+    def waitpod(name):
+        kraw('-n',ns,'wait','--for=condition=Ready','pod/'+name,'--timeout=150s',timeout=180)
+        return kjson('-n',ns,'get','pod',name)
+    def own_namespace():
+        guard(c); o=kjson('get','ns',ns); require(o['metadata']['uid']==uid and o['metadata']['labels'].get('sre-lab/session')==owner,'Namespace de teste divergente')
+    def get_http(address,host=None):
+        args=['curl','--noproxy','*','--fail','--silent','--show-error','--max-time','5']
+        if host: args+=['-H','Host: '+host]
+        for _ in range(12):
+            try:
+                if marker in run(args+['http://'+address+':80/']): return
+            except Health: pass
+            time.sleep(3)
+        raise Health('HTTP de teste não retornou marcador esperado')
+    try:
+        create([{'apiVersion':'v1','kind':'Namespace','metadata':{'name':ns,'labels':{**labels,'pod-security.kubernetes.io/enforce':'restricted'}}}]); created=True; uid=kjson('get','ns',ns)['metadata']['uid']
+        create([obj('v1','ResourceQuota','budget',{'hard':{'pods':'4','requests.cpu':'500m','requests.memory':'256Mi','limits.cpu':'1','limits.memory':'512Mi','persistentvolumeclaims':'1','requests.storage':'1Gi','services.loadbalancers':'1','services':'2'}}),obj('v1','PersistentVolumeClaim','data',{'storageClassName':'sre-test','accessModes':['ReadWriteOnce'],'resources':{'requests':{'storage':'64Mi'}}}),pod('web','worker-1',f'mkdir -p /tmp/www; echo {marker} > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www'),pod('client','worker-2','sleep 540')])
+        web=waitpod('web'); client=waitpod('client'); require(web['spec']['nodeName']=='worker-1' and client['spec']['nodeName']=='worker-2','Pods não estão em workers diferentes')
+        require(marker in kraw('-n',ns,'exec','client','--','wget','-qO-',f'http://{web["status"]["podIP"]}:8080/'),'Falha comunicação inter-worker')
+        kraw('-n',ns,'exec','client','--','nslookup','kubernetes.default.svc.cluster.local')
+        # O seletor usa label exclusiva e adicional de função, sem incluir cliente.
+        own_namespace(); kraw('-n',ns,'label','pod','web','app=sre-test-web')
+        create([obj('v1','Service','web',{'type':'LoadBalancer','selector':{'app':'sre-test-web','sre-lab/session':owner},'ports':[{'port':80,'targetPort':8080}]}),obj('networking.k8s.io/v1','Ingress','web',{'ingressClassName':'traefik','rules':[{'host':ns+'.'+c['network']['domain'],'http':{'paths':[{'path':'/','pathType':'Prefix','backend':{'service':{'name':'web','port':{'number':80}}}}]}}]})])
+        def lb(ns_,name):
+            for _ in range(24):
+                a=kjson('-n',ns_,'get','svc',name)['status'].get('loadBalancer',{}).get('ingress',[])
+                if a and 'ip' in a[0]:
+                    addr=ip.IPv4Address(a[0]['ip']); require(ip.IPv4Address(c['network']['pool_start'])<=addr<=ip.IPv4Address(c['network']['pool_end']),'IP fora do pool'); return str(addr)
+                time.sleep(3)
+            raise Health('LoadBalancer sem IP')
+        get_http(lb(ns,'web')); get_http(lb('traefik','traefik'),ns+'.'+c['network']['domain'])
+        create([pod('writer','worker-1',f'echo {marker} > /data/marker; sleep 540',True)])
+        writer=waitpod('writer'); require(writer['spec']['nodeName']=='worker-1','Writer no nó errado')
+        for _ in range(12):
+            if marker in kraw('-n',ns,'exec','writer','--','cat','/data/marker'): break
+            time.sleep(1)
+        pvc=kjson('-n',ns,'get','pvc','data'); require(pvc['status']['phase']=='Bound','PVC não Bound'); pv=kjson('get','pv',pvc['spec']['volumeName']); require(pv['spec']['claimRef']['uid']==pvc['metadata']['uid'] and 'worker-1' in json.dumps(pv['spec'].get('nodeAffinity',{})),'PV sem vínculo esperado')
+        own_namespace(); require(kjson('-n',ns,'get','pod','writer')['metadata']['uid']==writer['metadata']['uid'],'Writer divergente'); kraw('-n',ns,'delete','pod','writer','--wait=true','--timeout=90s',timeout=120)
+        create([pod('reader','worker-1','sleep 540',True)]); waitpod('reader'); require(marker in kraw('-n',ns,'exec','reader','--','cat','/data/marker'),'Dado não persistiu')
+        return 'Comunicação, DNS, LoadBalancer, Ingress, PVC e persistência local verificados'
+    finally:
+        if created and uid:
+            own_namespace()
+            # Namespace novo, nome aleatório, UID e label confirmados; não limpar se houver Pod/Service/PVC/Ingress alheio.
+            for kind in ('pods','services','persistentvolumeclaims','ingresses','resourcequotas'):
+                items=kjson('-n',ns,'get',kind)['items']; require(all(x['metadata'].get('labels',{}).get('sre-lab/session')==owner for x in items),'Objeto não registrado no namespace; limpeza interrompida')
+            kraw('delete','namespace',ns,'--wait=true','--timeout=120s',timeout=150)
+        elif created: print('Limpeza pendente: UID não registrado; namespace '+ns,file=sys.stderr)
+
+def check_one(c,name):
+    if name=='host': return host_check(c)
+    if name=='bootstrap': return bootstrap_check()
+    s=state(c)
+    if name=='vms': owned(c,s,True,True); return '5 VMs próprias em execução'
+    if name=='ssh': return trust_ssh(c,s)
+    if name=='network': trust_ssh(c,s); return 'IP e ping entre todos os nós; interface '+network_check(c)
+    if name=='ansible':
+        trust_ssh(c,s)
+        for n in NODES:
+            require(ssh(n,'hostname').strip()==n,'Hostname divergente')
+            ssh(n,'sudo','-n','true'); ssh(n,'systemctl','is-active','chrony'); ssh(n,'dpkg-query','-W','curl','ca-certificates','git','vim','python3-apt','chrony')
+            for peer in NODES: require(c['nodes'][peer]['ip'] in ssh(n,'getent','ahostsv4',peer),'Resolução divergente: '+peer)
+        return 'Hostname, sudo, pacotes e resolução conferidos'
+    return {'kubernetes':cluster_check,'etcd':etcd_check,'dns':dns_check,'metallb':metallb_check,'ingress':ingress_check,'storage':storage_check}[name](c)
+
+def exit_code(results):
+    codes={r['code'] for r in results}; return next((x for x in (2,1,3) if x in codes),0)
+
+def audit(c,selected,active=False,report=False,scope='all'):
+    results=[]
+    def record(name,fn):
+        t=time.monotonic()
+        try: detail=fn(); status,code='PASS',0
+        except Health as e: status,code,detail='FAIL',1,str(e)
+        except Block as e: status,code,detail='FAIL',2,str(e)
+        except (Incomplete,ValueError,KeyError,OSError) as e: status,code,detail='SKIP',3,f'Check não concluído: {type(e).__name__}'
+        r={'check':name,'status':status,'code':code,'detail':detail,'seconds':round(time.monotonic()-t,2)}; results.append(r); print(f'[{status}] {name}: {detail}')
+    for n in selected: record(n,lambda n=n:check_one(c,n))
+    if active:
+        if exit_code(results)==0: record('active',lambda:active_tests(c))
+        else: results.append({'check':'active','status':'SKIP','code':3,'detail':'Pré-requisitos não aprovados','seconds':0}); print('[SKIP] testes ativos bloqueados')
+    else: print('Testes funcionais ativos e failover real: não executados.')
+    code=exit_code(results); totals={x:sum(r['status']==x for r in results) for x in ('PASS','WARN','FAIL','SKIP')}
+    print(f'Escopo={scope} modo={"ativo" if active else "passivo"} {totals} exit={code}')
+    if report:
+        timestamp=dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ'); base=ROOT/'reports'/('validation-'+timestamp+'-'+uuid.uuid4().hex[:6]); data={'timestamp':timestamp,'scope':scope,'active':active,'exit':code,'totals':totals,'checks':results}; save(base.with_suffix('.json'),data)
+        txt='\n'.join(f'[{r["status"]}] {r["check"]}: {r["detail"]}' for r in results)+'\n'+str(totals)+'\n'
+        base.with_suffix('.log').write_text(txt); base.with_suffix('.md').write_text('# Auditoria '+timestamp+'\n\nEscopo: '+scope+'\n\n'+ '\n'.join('- '+l for l in txt.splitlines())+'\n'); print('Relatório: '+str(base))
+    return code
+
+HELP='''SRE LAB — comandos
+  make help | preflight | bootstrap | provision | prepare | cluster
+  make kubeconfig | addons | validate | install | status | start | stop
+  make ssh NODE=master-1
+  make test
+  ./scripts/validate.sh --help
+  ./scripts/incident.sh --help
+Configuração: cp config/lab.example.yml config/lab.yml; revise conforme README.
+Nenhum comando destrutivo. Instalação exige autorização interativa.'''
+
+def parser():
+    p=argparse.ArgumentParser(description=HELP,formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub=p.add_subparsers(dest='action',required=True)
+    for name in ['help','preflight','bootstrap','provision','prepare','cluster','kubeconfig','addons','install','status','start','stop']: sub.add_parser(name)
+    ss=sub.add_parser('ssh'); ss.add_argument('--node',choices=NODES,required=True)
+    a=sub.add_parser('validate'); a.add_argument('--all',action='store_true'); a.add_argument('--stage',choices=STAGE_MAP); a.add_argument('--active',action='store_true'); a.add_argument('--report',action='store_true')
+    for n in CHECKS: a.add_argument('--'+n,action='store_true')
+    return p
+
+def main(argv=None):
+    args=parser().parse_args(argv); action=args.action
+    if action=='help': print(HELP); return 0
+    os.umask(0o077)
+    c=config()
+    if action=='preflight': print(host_check(c)); return 0
+    if action=='validate' and not args.active:
+        selected=[n for n in CHECKS if getattr(args,n)]
+        require(not (args.stage and (args.all or selected)) and not (args.all and selected),'Escolha stage, all ou flags individuais')
+        if args.stage: selected=STAGES[:STAGE_MAP[args.stage]]
+        if not selected: selected=STAGES
+        return audit(c,selected,report=args.report,scope=args.stage or ','.join(selected))
+    if action=='status':
+        s=state(c); owned(c,s)
+        for n,uid in s['vms'].items(): print(n,vm_info(uid).get('VMState'))
+        print('Cluster registrado:', 'cluster' in s, '| Add-ons:',s.get('addons_complete',False)); return 0
+    if action=='ssh':
+        s=state(c); trust_ssh(c,s); d=ssh_config(args.node); return sp.call(['ssh','-o','StrictHostKeyChecking=yes','-o',f'UserKnownHostsFile={LOCAL/"known_hosts"}','-o','GlobalKnownHostsFile=/dev/null','-o','IdentitiesOnly=yes','-i',d['IdentityFile'],'vagrant@'+c['nodes'][args.node]['ip']],env=ENV)
+    authorize(c,action); LOCAL.mkdir(exist_ok=True,mode=0o700)
+    with (LOCAL/'operation.lock').open('a') as lock:
+        try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError: raise Block('Outra operação em andamento') from None
+        if action=='validate':
+            require(not args.stage and not any(getattr(args,n) for n in CHECKS),'--active exige auditoria completa'); return audit(c,STAGES,True,args.report,'all')
+        if action=='install':
+            for label,fn in [('preflight',host_check),('bootstrap',bootstrap),('provision',provision),('prepare',prepare),('cluster',deploy_cluster),('kubeconfig',register),('addons',addons)]:
+                print('=== '+label+' ===',flush=True); stage_log=ROOT/'reports/installation.log'; stage_log.parent.mkdir(exist_ok=True);
+                with stage_log.open('a') as out: out.write(dt.datetime.now(dt.timezone.utc).isoformat()+' START '+label+'\n')
+                try: result=fn(c)
+                except Exception:
+                    with stage_log.open('a') as out: out.write(dt.datetime.now(dt.timezone.utc).isoformat()+' FAIL '+label+'\n')
+                    raise
+                with stage_log.open('a') as out: out.write(dt.datetime.now(dt.timezone.utc).isoformat()+' DONE '+label+'\n')
+                print(result or 'Etapa executada')
+                selected={'bootstrap':['bootstrap'],'provision':['vms'],'prepare':['ssh','network','ansible'],'cluster':['kubernetes','etcd','dns'],'kubeconfig':['kubernetes'],'addons':['metallb','ingress','storage']}.get(label,[])
+                if selected:
+                    code=audit(c,selected,scope=label)
+                    if code: return code
+            return audit(c,STAGES,report=True,scope='install')
+        if action in ('start','stop'):
+            s=state(c); owned(c,s,True)
+            if action=='start': host_check(c, min_free_disk_gib=15)
+            for n in (NODES if action=='start' else list(reversed(NODES))):
+                owned(c,s,True); status=vm_info(s['vms'][n]).get('VMState')
+                if action=='start' and status!='"running"': vagrant('up',n,'--no-provision',capture=False,timeout=1800)
+                if action=='stop' and status=='"running"': vagrant('halt',n,capture=False,timeout=600)
+            owned(c,s,True,action=='start'); print('Operação concluída; execute make validate após start.'); return 0
+        fn={'bootstrap':bootstrap,'provision':provision,'prepare':prepare,'cluster':deploy_cluster,'kubeconfig':register,'addons':addons}[action]; fn(c); return 0
+
+if __name__=='__main__':
+    try: sys.exit(main())
+    except Block as e: print('[BLOQUEIO]',e,file=sys.stderr); sys.exit(2)
+    except Health as e: print('[FALHA]',e,file=sys.stderr); sys.exit(1)
+    except (ValueError,KeyError,OSError) as e: print('[BLOQUEIO] Estado ou configuração não interpretável:',type(e).__name__,file=sys.stderr); sys.exit(2)
+    except (KeyboardInterrupt,EOFError): print('Interrompido; sem limpeza automática.',file=sys.stderr); sys.exit(130)

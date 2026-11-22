@@ -1,0 +1,21 @@
+---
+- name: Verificar preparação Linux
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Confirmar hostname e endereço
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.hostname == inventory_hostname
+          - ip in ansible_facts.all_ipv4_addresses
+    - name: Consultar resolução dos nós
+      ansible.builtin.command: "getent ahostsv4 {{ item }}"
+      loop: "{{ groups['k8s_cluster'] }}"
+      register: resolution
+      changed_when: false
+      failed_when: hostvars[item].ip not in resolution.stdout
+    - name: Consultar serviço de horário
+      ansible.builtin.command: systemctl is-active chrony
+      changed_when: false

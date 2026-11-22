@@ -1,0 +1,20 @@
+---
+- name: Validar hosts próprios antes da preparação
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validar sistema, endereço e arquitetura
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '22.04'
+          - ansible_facts.architecture == 'x86_64'
+          - ip in ansible_facts.all_ipv4_addresses
+          - ansible_facts.memtotal_mb >= 2700
+    - name: Confirmar acesso sudo
+      ansible.builtin.command: id -u
+      register: sudo_check
+      changed_when: false
+      failed_when: sudo_check.stdout != '0'

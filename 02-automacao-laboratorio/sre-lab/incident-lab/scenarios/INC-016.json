@@ -1,0 +1,17 @@
+{
+  "id": "INC-016",
+  "level": "Avançado",
+  "title": "Rollback incompatível",
+  "alert": "Versão anterior não passa validação",
+  "impact": "Recuperação exige análise de dados",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "log: versão anterior espera coluna antiga",
+    "histórico: release nova alterou schema; rollback da imagem não altera schema"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare versões de aplicação e compatibilidade de dados"
+  ]
+}

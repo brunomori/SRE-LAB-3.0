@@ -1,0 +1,17 @@
+{
+  "id": "INC-012",
+  "level": "Intermediário",
+  "title": "Argo CD OutOfSync",
+  "alert": "Versão desejada e observada divergem",
+  "impact": "Mudança não reconciliada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "desired revision: commit-a; live revision: commit-b",
+    "status: OutOfSync; diff fictício: image version"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare Git desejado e estado observado"
+  ]
+}

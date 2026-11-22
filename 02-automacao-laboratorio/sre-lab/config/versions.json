@@ -1,0 +1,1 @@
+{"kubespray":"v2.32.0","commit":"9751ea6f63244e433a7a6263d9ecf381e57bb8e9","kubernetes":"1.36.4","helm":"v3.22.1","helm_sha256":"896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea","metallb":"v0.16.2","traefik_chart":"42.4.0","local_path":"v0.0.37","test_image":"busybox:1.37.0"}

@@ -1,0 +1,17 @@
+{
+  "id": "INC-005",
+  "level": "Intermediário",
+  "title": "Service sem endpoints",
+  "alert": "Aplicação sem resposta pelo Service",
+  "impact": "Tráfego interno afetado",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "Pod: Ready; label app=helpdesk",
+    "EndpointSlice fictício: endpoints=[]; selector app=helpdesk-api"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare labels e seletores"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "solution": "O estado observado diverge da revisão Git desejada.",
+  "recovery": "Reconciliação validada e estado Synced/Healthy.",
+  "keywords": [
+    "git",
+    "drift"
+  ]
+}

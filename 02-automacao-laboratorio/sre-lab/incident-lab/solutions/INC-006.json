@@ -1,0 +1,8 @@
+{
+  "solution": "O backend registrado não corresponde à porta atendida.",
+  "recovery": "Rota HTTP responde 200 e métricas de erro normalizadas.",
+  "keywords": [
+    "porta",
+    "service"
+  ]
+}

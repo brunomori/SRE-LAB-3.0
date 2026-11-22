@@ -1,0 +1,17 @@
+{
+  "id": "INC-014",
+  "level": "Avançado",
+  "title": "Latência elevada",
+  "alert": "p95 aumentou após release",
+  "impact": "Usuários relatam lentidão",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "métricas: p95 120ms → 900ms; erros estáveis",
+    "traço sintético: espera de banco domina duração; CPU app estável"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Correlacione métricas e dependências"
+  ]
+}

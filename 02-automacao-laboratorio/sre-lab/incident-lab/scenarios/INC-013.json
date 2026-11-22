@@ -1,0 +1,17 @@
+{
+  "id": "INC-013",
+  "level": "Avançado",
+  "title": "Terraform Drift",
+  "alert": "Plan indica mudança inesperada",
+  "impact": "Mudança IaC bloqueada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "plan: quota de CPU seria alterada",
+    "registro fictício: configuração manual diferente do código"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Investigue propriedade e alteração fora do IaC"
+  ]
+}

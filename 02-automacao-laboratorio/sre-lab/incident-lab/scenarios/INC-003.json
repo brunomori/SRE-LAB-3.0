@@ -1,0 +1,17 @@
+{
+  "id": "INC-003",
+  "level": "Básico",
+  "title": "Pod Pending",
+  "alert": "Réplicas aguardam agendamento",
+  "impact": "Capacidade parcial",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "event: FailedScheduling; insufficient memory",
+    "scheduler: 2 workers; requests totais acima da capacidade alocável"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare recursos solicitados e capacidade"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "sre-lab", "box": "ubuntu/jammy64", "box_version": "REVISAR", "python": "python3.13",
+  "network_reviewed": false, "compatibility_reviewed": false,
+  "network": {"subnet": "192.168.57.0/24", "vip": "192.168.57.100", "pool_start": "192.168.57.200", "pool_end": "192.168.57.219", "pods": "10.244.0.0/16", "services": "10.96.0.0/12", "domain": "sre-lab.test"},
+  "nodes": {
+    "master-1": {"ip": "192.168.57.11", "cpu": 2, "memory": 3072, "disk": 30},
+    "master-2": {"ip": "192.168.57.12", "cpu": 2, "memory": 3072, "disk": 30},
+    "master-3": {"ip": "192.168.57.13", "cpu": 2, "memory": 3072, "disk": 30},
+    "worker-1": {"ip": "192.168.57.21", "cpu": 2, "memory": 6144, "disk": 50},
+    "worker-2": {"ip": "192.168.57.22", "cpu": 2, "memory": 6144, "disk": 50}
+  }, "timezone": "Etc/UTC", "min_free_disk_gib": 60
+}

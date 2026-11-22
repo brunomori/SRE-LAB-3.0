@@ -1,0 +1,8 @@
+{
+  "solution": "A configuração requerida não está presente na aplicação fictícia.",
+  "recovery": "Configuração validada; réplicas Ready e health check OK.",
+  "keywords": [
+    "configuração",
+    "logs"
+  ]
+}

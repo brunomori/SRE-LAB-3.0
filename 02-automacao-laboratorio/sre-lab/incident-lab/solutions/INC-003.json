@@ -1,0 +1,8 @@
+{
+  "solution": "O scheduler não encontrou capacidade suficiente para os requests.",
+  "recovery": "Requests e capacidade compatíveis; réplicas agendadas.",
+  "keywords": [
+    "requests",
+    "memória"
+  ]
+}

@@ -1,0 +1,32 @@
+image:
+  tag: v3.7.18
+deployment:
+  replicas: 2
+providers:
+  kubernetesCRD:
+    enabled: false
+  kubernetesGateway:
+    enabled: false
+  kubernetesIngress:
+    enabled: true
+    publishedService:
+      enabled: true
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+api:
+  dashboard: false
+ingressRoute:
+  dashboard:
+    enabled: false
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+service:
+  spec:
+    type: LoadBalancer

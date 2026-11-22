@@ -1,0 +1,17 @@
+{
+  "id": "INC-010",
+  "level": "Intermediário",
+  "title": "Migration SQL",
+  "alert": "Nova release não conclui validação",
+  "impact": "Promoção bloqueada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "log migration: coluna priority já existe",
+    "histórico: versão do schema não corresponde à revisão da aplicação"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare histórico de migrations com schema"
+  ]
+}

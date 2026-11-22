@@ -1,0 +1,10 @@
+---
+- name: Manter resolução interna em bloco próprio
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: '# {mark} SRE LAB NODES'
+    backup: true
+    block: |
+      {% for node in groups['k8s_cluster'] %}
+      {{ hostvars[node].ip }} {{ node }}
+      {% endfor %}

@@ -1,0 +1,8 @@
+{
+  "solution": "A classe solicitada não corresponde à disponível.",
+  "recovery": "PVC Bound quando consumidor presente; escrita/leitura de teste OK.",
+  "keywords": [
+    "storageclass",
+    "pvc"
+  ]
+}

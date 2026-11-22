@@ -1,0 +1,8 @@
+{
+  "solution": "O seletor não corresponde aos labels dos Pods.",
+  "recovery": "Endpoints prontos e requisição de teste bem-sucedida.",
+  "keywords": [
+    "selector",
+    "endpoint"
+  ]
+}

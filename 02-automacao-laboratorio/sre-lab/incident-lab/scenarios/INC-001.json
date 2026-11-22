@@ -1,0 +1,17 @@
+{
+  "id": "INC-001",
+  "level": "Básico",
+  "title": "CrashLoopBackOff",
+  "alert": "API de chamados reinicia repetidamente",
+  "impact": "3 réplicas indisponíveis",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "status: Waiting, reason: CrashLoopBackOff; restartCount: 8",
+    "log anterior: Configuração obrigatória APP_MODE ausente"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare logs anteriores e eventos"
+  ]
+}

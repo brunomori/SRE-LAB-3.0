@@ -1,0 +1,8 @@
+{
+  "solution": "A dependência de banco está indisponível no cenário.",
+  "recovery": "Conexão e consulta sintética bem-sucedidas.",
+  "keywords": [
+    "banco",
+    "endpoint"
+  ]
+}

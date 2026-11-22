@@ -1,0 +1,17 @@
+{
+  "id": "INC-009",
+  "level": "Intermediário",
+  "title": "PostgreSQL indisponível",
+  "alert": "Operações de cadastro retornam 500",
+  "impact": "Operações dependentes do banco",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "app: connection timeout; DB_HOST=postgres-service",
+    "painel: app Ready; conexão de banco falha; serviço de banco sem endpoints"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Separe saúde da aplicação e da dependência"
+  ]
+}

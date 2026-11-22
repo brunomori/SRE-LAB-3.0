@@ -1,0 +1,17 @@
+{
+  "id": "INC-011",
+  "level": "Intermediário",
+  "title": "Pipeline Jenkins",
+  "alert": "Build não chega ao registry",
+  "impact": "Entrega atrasada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "stage test: 1 failed, 12 passed",
+    "stage publish: skipped; teste de validação de formulário falhou"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Identifique o primeiro estágio com falha"
+  ]
+}

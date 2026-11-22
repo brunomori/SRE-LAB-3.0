@@ -1,0 +1,15 @@
+---
+- name: Instalar ferramentas administrativas
+  ansible.builtin.apt:
+    name: [curl, ca-certificates, git, vim, python3-apt, chrony]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+- name: Configurar timezone
+  community.general.timezone:
+    name: "{{ lab_timezone }}"
+- name: Habilitar sincronização de horário
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true

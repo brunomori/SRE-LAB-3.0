@@ -1,0 +1,3 @@
+# Metodologia de estudos
+
+Siga [ROADMAP](../ROADMAP.md). Para cada ferramenta, registre: pré-requisitos; arquitetura; primeira instalação manual; testes de aceite; módulo IaC; integração; troubleshooting; runbook; evidências e limites. Use Git e PRs para registrar alterações, sem dados ou configurações do trabalho. Terraform gerencia recursos escolhidos da plataforma, Argo CD gerencia aplicações e GitOps; não compartilhar propriedade. Em uma transição, importar/adotar somente após revisar o estado e o plan. Concentre-se em explicar por que o serviço está saudável ou não, e como provar a recuperação, em vez de acumular instalações.

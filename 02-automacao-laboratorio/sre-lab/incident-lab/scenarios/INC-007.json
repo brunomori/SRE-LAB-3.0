@@ -1,0 +1,17 @@
+{
+  "id": "INC-007",
+  "level": "Intermediário",
+  "title": "PVC Pending",
+  "alert": "Banco fictício não agenda",
+  "impact": "Inicialização de banco atrasada",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "PVC: Pending; storageClass=local-example",
+    "event: storageclass não encontrada; nenhuma provisão registrada"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Verifique StorageClass e eventos do PVC"
+  ]
+}

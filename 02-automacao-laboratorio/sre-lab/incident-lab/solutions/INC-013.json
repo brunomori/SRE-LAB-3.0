@@ -1,0 +1,8 @@
+{
+  "solution": "A configuração observada foi alterada fora do fluxo IaC.",
+  "recovery": "Propriedade definida, código revisado e plan aprovado.",
+  "keywords": [
+    "state",
+    "drift"
+  ]
+}

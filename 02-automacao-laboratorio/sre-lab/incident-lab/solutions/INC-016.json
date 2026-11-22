@@ -1,0 +1,8 @@
+{
+  "solution": "Rollback da imagem não restaura automaticamente o schema.",
+  "recovery": "Plano de roll-forward ou restauração validado em dados sintéticos.",
+  "keywords": [
+    "rollback",
+    "schema"
+  ]
+}

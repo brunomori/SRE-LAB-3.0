@@ -1,0 +1,17 @@
+{
+  "id": "INC-008",
+  "level": "Intermediário",
+  "title": "OOMKilled",
+  "alert": "Serviço reinicia sob uso normal",
+  "impact": "Intermitência",
+  "objective": "Identificar evidências, hipótese, mitigação e critérios de recuperação.",
+  "prerequisites": "Nenhum cluster necessário; todos os dados são sintéticos.",
+  "evidence": [
+    "lastState: terminated; reason: OOMKilled",
+    "gráfico fictício: memória próxima do limite; CPU estável"
+  ],
+  "hints": [
+    "Identifique a primeira mudança observável.",
+    "Compare memória observada com limite"
+  ]
+}
