@@ -1,6 +1,6 @@
 # SRE LAB v3.0 — Kubernetes Platform Engineering
 
-Laboratório local para aprofundar Kubernetes, IaC, GitOps e confiabilidade. Este pacote contém **código de fundação para revisão**, não uma instalação homologada. Nenhuma VM foi criada durante a geração. Consulte `docs/validation-report.md` e `docs/compatibility.md` antes de executar. O roteiro de estudos permanece por sua conta.
+Laboratório local para aprofundar Kubernetes, IaC, GitOps e confiabilidade. A geração inicial do pacote ocorreu sem execução de VMs; posteriormente o laboratório foi instalado e **13 verificações passaram no host em 17/11/2026**, conforme [registro de validação prática](docs/validacao-pratica-2026-11-17.md). O orquestrador foi revisado em 21/11/2026 e aprovado em **29 testes unitários isolados**. Essa revisão no GitHub **não foi aplicada automaticamente ao Ubuntu**. Consulte [o relatório inicial (histórico)](docs/validation-report.md) e os requisitos de compatibilidade antes de uma instalação nova.
 
 ## Arquitetura
 
@@ -97,4 +97,4 @@ Siga `ROADMAP.md`: administração Kubernetes, Helm/Terraform, Git/GitHub, aplic
 
 ## Verificações locais da fonte
 
-`./scripts/static-check.sh` executa compilação Python, sintaxe Bash/Ruby, testes unitários e dry-run Makefile. Não acessa VMs. A versão entregue foi testada estaticamente; a homologação real permanece pendente. Não marque a revisão de compatibilidade como concluída até resolver os pontos de suporte indicados no relatório.
+`./scripts/static-check.sh` executa compilação Python, sintaxe Bash/Ruby, testes unitários e dry-run Makefile. Não acessa VMs. A revisão atual passou em **29 testes unitários** fora do host. A [validação real de 17/11/2026](docs/validacao-pratica-2026-11-17.md) é um registro pontual, não prova de idempotência nem homologação para instalações futuras.

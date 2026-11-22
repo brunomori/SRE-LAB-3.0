@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 ROOT=Path(__file__).resolve().parents[1]
 def mod(name):
@@ -72,6 +72,91 @@ class ConfigTests(unittest.TestCase):
     def test_bootstrap_guard_no_mutation(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(lab,'LOCAL',Path(tmp)):
             with self.assertRaises(lab.Block): lab.bootstrap_check()
+
+class RegressionTests(unittest.TestCase):
+    """Regressões encontradas na implantação real."""
+
+    def test_disk_margin_install_vs_restart(self):
+        c=cfg()
+        self.assertEqual(lab.disk_floor(c),60)
+        self.assertEqual(lab.disk_floor(c,15),15)
+        with self.assertRaises(lab.Block): lab.disk_floor(c,0)
+        with self.assertRaises(lab.Block): lab.disk_floor(c,False)
+
+    def test_vbox_user_device_not_kernel_device(self):
+        dev=MagicMock()
+        dev.exists.return_value=True
+        with patch.object(lab,'Path',return_value=dev) as mkpath,patch.object(lab.os,'access',return_value=True) as access:
+            lab.vbox_user_device_check()
+            mkpath.assert_called_once_with('/dev/vboxdrvu')
+            access.assert_called_once_with(dev,lab.os.R_OK|lab.os.W_OK)
+        dev.exists.return_value=False
+        with patch.object(lab,'Path',return_value=dev):
+            with self.assertRaises(lab.Block): lab.vbox_user_device_check()
+
+    def test_known_hosts_writes_individual_lines(self):
+        fake_fp='SHA256:'+'A'*43
+        def fake_run(args,**kw):
+            if args[0]=='ssh-keyscan':
+                ipaddr=args[-1]
+                return '\n'.join([f'{ipaddr} ssh-ed25519 AAAABBBB',
+                                  f'[{ipaddr}]:22 ssh-ed25519 AAAABBBB'])
+            if args[0]=='ssh-keygen': return f'256 {fake_fp} root@host (ED25519)\n'
+            self.fail('Comando externo inesperado '+str(args))
+        with tempfile.TemporaryDirectory() as tmp,patch.object(lab,'LOCAL',Path(tmp)),\
+             patch.object(lab,'owned'),patch.object(lab,'ssh_config',return_value={'Port':'2200'}),\
+             patch.object(lab,'run',side_effect=fake_run):
+            lab.save(Path(tmp)/'ssh-fingerprints.json',{n:fake_fp for n in lab.NODES})
+            self.assertEqual(lab.trust_ssh(cfg(),{},enroll=True),'Cinco host keys verificadas')
+            lines=(Path(tmp)/'known_hosts').read_text().splitlines()
+            self.assertEqual(len(lines),10)
+            self.assertEqual(lab.trust_ssh(cfg(),{},enroll=False),'Cinco host keys verificadas')
+
+    def test_reject_conflicting_keys_same_vm(self):
+        fake_fp='SHA256:'+'A'*43
+        def fake_run(args,**kw):
+            if args[0]=='ssh-keyscan':
+                ipaddr=args[-1]
+                return f'{ipaddr} ssh-ed25519 AAAABBBB\n{ipaddr} ssh-ed25519 CCCCFFFF'
+            self.fail('O processamento deveria bloquear antes de consultar o fingerprint')
+        with tempfile.TemporaryDirectory() as tmp,patch.object(lab,'LOCAL',Path(tmp)),\
+             patch.object(lab,'owned'),patch.object(lab,'ssh_config',return_value={'Port':'2200'}),\
+             patch.object(lab,'run',side_effect=fake_run):
+            lab.save(Path(tmp)/'ssh-fingerprints.json',{n:fake_fp for n in lab.NODES})
+            with self.assertRaises(lab.Block): lab.trust_ssh(cfg(),{},enroll=True)
+
+    def test_fingerprint_paste_from_console(self):
+        fp='SHA256:'+'A'*43
+        self.assertEqual(lab.parse_console_fingerprint(' '+fp+' '),fp)
+        self.assertEqual(lab.parse_console_fingerprint('256 '+fp+' root@master-1 (ED25519)'),fp)
+        with self.assertRaises(lab.Block): lab.parse_console_fingerprint('256 '+fp+' root@master-1 (RSA)')
+        with self.assertRaises(lab.Block): lab.parse_console_fingerprint('invalido')
+
+    def test_whitespace_in_authorization(self):
+        with patch.object(lab.sys.stdin,'isatty',return_value=True),\
+             patch('builtins.input',return_value='  sre-lab  '),contextlib.redirect_stdout(io.StringIO()):
+            lab.authorize(cfg(),'start')
+        with patch.object(lab.sys.stdin,'isatty',return_value='outro-lab'),contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(lab.Block): lab.authorize(cfg(),'start')
+
+    def test_start_uses_lower_disk_margin_without_reprovisioning(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(lab,'LOCAL',Path(tmp)),\
+             patch.object(lab,'config',return_value=cfg()),\
+             patch.object(lab,'authorize'),patch.object(lab,'state',return_value={'vms':{n:n for n in lab.NODES}}),\
+             patch.object(lab,'owned'),patch.object(lab,'host_check',return_value='ok') as host,\
+             patch.object(lab,'vm_info',return_value={'VMState':'"running"'}),\
+             patch.object(lab,'vagrant') as vagrant,contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lab.main(['start']),0)
+            host.assert_called_once_with(cfg(),min_free_disk_gib=15)
+            vagrant.assert_not_called()
+
+    def test_audit_host_of_existing_cluster_uses_lower_margin(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(lab,'LOCAL',Path(tmp)),\
+             patch.object(lab,'state',return_value={'vms':{n:n for n in lab.NODES}}),\
+             patch.object(lab,'host_check',return_value='ok') as check:
+            (Path(tmp)/'identity.json').write_text('{}')
+            self.assertEqual(lab.check_one(cfg(),'host'),'ok')
+            check.assert_called_once_with(cfg(),min_free_disk_gib=15)
 
 class IncidentTests(unittest.TestCase):
     def test_catalog(self):

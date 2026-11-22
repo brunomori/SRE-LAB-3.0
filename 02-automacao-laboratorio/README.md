@@ -2,7 +2,7 @@
 
 > **SRE LAB 3.0 · Documentação do orquestrador Python, comandos e fluxo de operação.**
 
-Este tema documenta como o arquivo [**scripts/lab.py**](scripts/lab.py) gerencia a fundação do laboratório. A automação é executada no **host Ubuntu**, interage com Vagrant/VirtualBox e coordena Ansible/Kubespray e o Kubernetes local. A intenção é estudar **cada etapa**, validar o estado e praticar troubleshooting, sem executar comandos às cegas.
+Este tema documenta como o arquivo [**sre-lab/scripts/lab.py**](sre-lab/scripts/lab.py) gerencia a fundação do laboratório. A automação é executada no **host Ubuntu**, interage com Vagrant/VirtualBox e coordena Ansible/Kubespray e o Kubernetes local. A intenção é estudar **cada etapa**, validar o estado e praticar troubleshooting, sem executar comandos às cegas.
 
 **Importante sobre esta publicação:** o código acima é a versão revisada do orquestrador, baseada no arquivo enviado após a instalação real. Ele é disponibilizado para estudo e versionamento; **não é um projeto executável isoladamente**. Para executar os comandos abaixo, é necessário o **pacote completo do SRE LAB** (Makefile, config, vagrant, ansible, addons, scripts, testes e dependências) já existente no Ubuntu. Copiar somente este lab.py para uma pasta vazia não instala o laboratório. **A publicação no GitHub não altera o cluster local.**
 
@@ -36,7 +36,7 @@ Topologia prevista no script: **3 control planes/etcd (master-1, master-2, maste
 
 | Arquivo ou diretório (no pacote completo) | Responsabilidade |
 | --- | --- |
-| [scripts/lab.py](scripts/lab.py) | Orquestrador central em Python (código revisado publicado aqui). |
+| [scripts/lab.py](sre-lab/scripts/lab.py) | Orquestrador central em Python (código revisado publicado aqui). |
 | Makefile | Atalhos para chamar as ações do orquestrador. |
 | config/lab.example.yml | Modelo de configuração de recursos, IPs, rede, box e margens. |
 | config/lab.yml | Configuração efetiva e local; não deve ser publicada. |
@@ -49,7 +49,7 @@ Topologia prevista no script: **3 control planes/etcd (master-1, master-2, maste
 | tests/test_lab.py | Testes automatizados do orquestrador. |
 | .local/ | Identidades, fingerprints, inventário, binários e kubeconfig locais. **Nunca publicar ou apagar para corrigir erros.** |
 
-O GitHub deste tema publica **o lab.py revisado e sua documentação**, e não uma cópia da pasta privada .local nem o ambiente já instalado.
+O GitHub deste tema contém o **[pacote-fonte completo](sre-lab/)**, com o orquestrador, testes e documentação. A pasta privada .local e os recursos em execução no computador permanecem fora do repositório.
 
 ## 3. Pré-requisitos
 

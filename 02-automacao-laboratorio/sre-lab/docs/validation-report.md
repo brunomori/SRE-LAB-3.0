@@ -1,4 +1,6 @@
-# Relatório de validação — SRE LAB v3.0
+# Relatório de validação — SRE LAB v3.0 (geração inicial)
+
+> **Registro histórico:** este relatório descreve a geração inicial sem infraestrutura real. Posteriormente, houve [13 verificações de integração aprovadas no host](validacao-pratica-2026-11-17.md) e a revisão do orquestrador passou em 29 testes unitários. São escopos e momentos diferentes.
 
 **Resultado:** código gerado e verificações estáticas/unitárias executadas; **não homologado para instalação real**. Nenhuma VM, cluster, conta GitHub ou infraestrutura externa foi acessada ou alterada. O ambiente de geração não dispõe de VirtualBox, Vagrant, Ansible, Helm, kubectl ou ShellCheck; a tentativa de acesso direto a raw.githubusercontent.com falhou por DNS. A documentação oficial foi consultada pelo navegador de pesquisa, não houve download real de dependências.
 

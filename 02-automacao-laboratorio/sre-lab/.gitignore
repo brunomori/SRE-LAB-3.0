@@ -1,0 +1,25 @@
+# Estado privado do laboratório e saídas geradas
+.local/
+config/lab.yml
+vagrant/.vagrant/
+reports/
+
+# Caches e arquivos de backup
+__pycache__/
+*.py[cod]
+*.bak
+*.bak-*
+*.pre-known-hosts-fix
+*.retry
+
+# Terraform, credenciais e dados temporários
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.pem
+*.key
+*.creds
+*.kubeconfig
+.env
+.env.*

@@ -146,14 +146,39 @@ def owned(c,s,all_required=False,running=False):
             require(not all_required,'VM ainda não provisionada: '+node)
     return actual
 
+def disk_floor(c, override=None):
+    """Reserva de disco por operação: instalação usa o valor do lab.yml.
+
+    Retomada/validação do laboratório existente pode usar um piso menor,
+    sem afrouxar as verificações de identidade, RAM e rede.
+    """
+    if override is None:
+        return c['min_free_disk_gib']
+    require(type(override) is int and override >= 1,
+            'Margem mínima de disco inválida')
+    return override
+
+
+def vbox_user_device_check():
+    """VBoxManage usa o dispositivo de usuário /dev/vboxdrvu.
+
+    /dev/vboxdrv pertence ao driver do kernel e não precisa ser gravável
+    diretamente pelo usuário, portanto não serve como teste de permissão.
+    """
+    device = Path('/dev/vboxdrvu')
+    require(device.exists(),
+            'Dispositivo /dev/vboxdrvu ausente; verifique os módulos e drivers do VirtualBox')
+    require(os.access(device, os.R_OK | os.W_OK),
+            'Sem acesso a /dev/vboxdrvu; verifique permissões e grupos do VirtualBox')
+
+
 def host_check(c, min_free_disk_gib=None):
     require(os.geteuid()!=0,'Execute com usuário normal, não root')
     require(platform.system()=='Linux' and platform.machine()=='x86_64','Host Linux x86_64 obrigatório')
     require('ID=ubuntu' in Path('/etc/os-release').read_text(),'Host Ubuntu obrigatório')
     for cmd in ('VBoxManage','vagrant','git','ssh','ssh-keyscan','ssh-keygen','ip','curl','make',c['python']): require(shutil.which(cmd),f'Instale {cmd} pelo procedimento oficial')
     pv=run([c['python'],'-c','import sys; print("%s.%s" % sys.version_info[:2])']).strip(); require(pv in ('3.11','3.12','3.13'),'Python incompatível')
-    require(Path('/dev/vboxdrv').exists(),'Driver VirtualBox indisponível')
-    require(os.access('/dev/vboxdrvu',os.R_OK|os.W_OK),'Sem acesso ao driver VirtualBox')
+    vbox_user_device_check()
     run(['VBoxManage','--version']); run(['vagrant','--version'])
     s=state(c) if (LOCAL/'identity.json').exists() else {'vms':{},'interfaces':[]}
     owned(c,s)
@@ -166,8 +191,11 @@ def host_check(c, min_free_disk_gib=None):
     require(m is not None,'Não foi possível identificar pasta de VMs do VirtualBox')
     base=Path(m[1].strip()).expanduser()
     while not base.exists() and base!=base.parent: base=base.parent
-    required_disk = c['min_free_disk_gib'] if min_free_disk_gib is None else min_free_disk_gib
-    for path in (ROOT,base): require(shutil.disk_usage(path).free>=required_disk*1024**3,'Espaço livre insuficiente: '+str(path))
+    minimum = disk_floor(c, min_free_disk_gib)
+    for path in (ROOT,base):
+        free_gib = shutil.disk_usage(path).free / 1024**3
+        require(free_gib>=minimum,
+                f'Espaço livre insuficiente: {path} ({free_gib:.1f} GiB disponíveis; mínimo {minimum} GiB para esta operação)')
     nets=[ip.IPv4Network(c['network'][k]) for k in ('subnet','pods','services')]
     for r in json.loads(run(['ip','-j','-4','route','show','table','all'])):
         dst=r.get('dst','default')
@@ -189,7 +217,8 @@ def host_check(c, min_free_disk_gib=None):
 def authorize(c,action):
     require(sys.stdin.isatty(),'Autorização interativa obrigatória')
     print(f'Projeto {c["name"]}: {action}. Destino {c["network"]["subnet"]}. Nenhum cluster externo.')
-    require(input(f'Digite {c["name"]} para autorizar: ')==c['name'],'Operação não autorizada')
+    require(input(f'Digite {c["name"]} para autorizar: ').strip()==c['name'],
+            'Operação não autorizada')
 
 def download(url,dst,sha=None):
     dst=Path(dst); dst.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -271,6 +300,21 @@ def ssh_config(n):
     key=Path(d.get('IdentityFile','')).resolve(); require(key.is_file() and LOCAL.resolve() in key.parents,'Chave SSH fora do estado privado')
     require(int(d.get('Port','0'))>0,'Porta SSH inválida'); return d
 
+def parse_console_fingerprint(value):
+    """Aceita SHA256 puro ou linha completa de ssh-keygen -lf (console VM).
+
+    Nunca deriva confiança da saída do ssh-keyscan: apenas normaliza a
+    transcrição fornecida manualmente pelo operador.
+    """
+    value = value.strip()
+    m = re.fullmatch(r'SHA256:[A-Za-z0-9+/]{43}', value)
+    if m: return value
+    m = re.fullmatch(r'256\s+(SHA256:[A-Za-z0-9+/]{43})\s+.+\(ED25519\)', value)
+    require(m is not None,
+            'Fingerprint inválido: digite SHA256:... ou a linha ED25519 do console')
+    return m.group(1)
+
+
 def trust_ssh(c,s, enroll=False):
     owned(c,s,True,True); known=LOCAL/'known_hosts'; fpfile=LOCAL/'ssh-fingerprints.json'
     fps=load(fpfile) if fpfile.exists() else {}
@@ -278,15 +322,19 @@ def trust_ssh(c,s, enroll=False):
     for n in NODES:
         d=ssh_config(n); port=d['Port']; scan=run(['ssh-keyscan','-T','5','-t','ed25519',c['nodes'][n]['ip']]).strip()
         # O fingerprint deve ser comparado com o console da VM, não com o scan.
+        key_lines = scan.splitlines()
+        require(key_lines and all(len(line.split())==3 and line.split()[1]=='ssh-ed25519' for line in key_lines)
+                and len({line.split()[2] for line in key_lines})==1,
+                'ssh-keyscan retornou chaves ED25519 ausentes ou divergentes: '+n)
         got=run(['ssh-keygen','-lf','-'],data=scan+'\n').split()[1]
         if n not in fps:
             require(enroll and sys.stdin.isatty(),'Fingerprint não registrado; execute make prepare interativamente')
             print(f'{n}: via console da VM própria execute ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')
-            expected=input('Digite o fingerprint SHA256 exibido no console: ').strip()
+            expected=parse_console_fingerprint(input('Cole o SHA256 (ou a linha ED25519) do console: '))
             require(expected==got,'Fingerprint não coincide; interrompido')
             fps[n]=expected; save(fpfile,fps)
         require(fps[n]==got,'Host key alterada: '+n)
-        lines.extend(scan.splitlines())
+        lines.extend(key_lines)
     if enroll:
         known.write_text('\n'.join(lines)+'\n'); known.chmod(0o600)
     else: require(known.is_file() and set(known.read_text().splitlines())==set(lines),'known_hosts divergente; execute prepare somente após revisar portas')
@@ -508,7 +556,13 @@ def active_tests(c):
         elif created: print('Limpeza pendente: UID não registrado; namespace '+ns,file=sys.stderr)
 
 def check_one(c,name):
-    if name=='host': return host_check(c)
+    if name=='host':
+        # Auditoria de um cluster já provisionado não exige margem de instalação.
+        if (LOCAL/'identity.json').exists():
+            s=state(c)
+            if set(s.get('vms',{}))==set(NODES):
+                return host_check(c,min_free_disk_gib=15)
+        return host_check(c)
     if name=='bootstrap': return bootstrap_check()
     s=state(c)
     if name=='vms': owned(c,s,True,True); return '5 VMs próprias em execução'
@@ -608,7 +662,7 @@ def main(argv=None):
             return audit(c,STAGES,report=True,scope='install')
         if action in ('start','stop'):
             s=state(c); owned(c,s,True)
-            if action=='start': host_check(c, min_free_disk_gib=15)
+            if action=='start': host_check(c,min_free_disk_gib=15)
             for n in (NODES if action=='start' else list(reversed(NODES))):
                 owned(c,s,True); status=vm_info(s['vms'][n]).get('VMState')
                 if action=='start' and status!='"running"': vagrant('up',n,'--no-provision',capture=False,timeout=1800)
@@ -621,4 +675,6 @@ if __name__=='__main__':
     except Block as e: print('[BLOQUEIO]',e,file=sys.stderr); sys.exit(2)
     except Health as e: print('[FALHA]',e,file=sys.stderr); sys.exit(1)
     except (ValueError,KeyError,OSError) as e: print('[BLOQUEIO] Estado ou configuração não interpretável:',type(e).__name__,file=sys.stderr); sys.exit(2)
-    except (KeyboardInterrupt,EOFError): print('Interrompido; sem limpeza automática.',file=sys.stderr); sys.exit(130)
+    except (KeyboardInterrupt,EOFError):
+        print('Interrompido (exit 130). Nenhum rollback automático: confira make status e make validate antes de retomar.',file=sys.stderr)
+        sys.exit(130)
