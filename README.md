@@ -19,7 +19,7 @@ Um ambiente de estudos progressivo para construir, operar, automatizar e evoluir
 
 O laboratório foi planejado para conectar infraestrutura, aplicações, dados, entrega e operação em um **único ambiente de prática**.
 
-![Mapa de estudos, arquitetura e roadmap do SRE LAB 3.0](assets/mapa-estudos-sre-lab-3.0.png)
+![Mapa de estudos, arquitetura e roadmap do SRE LAB 3.0](assets/mapa-estudos-sre-lab-s3.0.png)
 
 *Mapa de estudos e prática: arquitetura, stack de ferramentas, etapas e evolução planejada do laboratório.*
 
