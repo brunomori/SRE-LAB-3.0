@@ -10,7 +10,8 @@ Um ambiente de estudos progressivo para construir, operar, automatizar e evoluir
 
 - **Infraestrutura reproduzível:** preparar e administrar ambientes Linux e máquinas virtuais.
 - **Orquestração de aplicações:** operar Kubernetes, seus recursos, armazenamento, rede e políticas de acesso.
-- **Automação e entrega:** construir pipelines de CI/CD, empacotar aplicações e adotar GitOps.
+- **Automação e scripting:** aplicar Bash e Python para tarefas operacionais, verificações de saúde, APIs, logs e relatórios.
+- **Versionamento e entrega:** praticar Git com Trunk-Based Development, Pull Requests, testes automatizados, CI/CD e GitOps.
 - **Confiabilidade:** observar métricas, logs e alertas; investigar incidentes; validar recuperação e resiliência.
 - **Portfólio técnico:** registrar decisões, comandos testados, problemas e aprendizados em documentação pública, sem expor informações sensíveis.
 
@@ -38,7 +39,7 @@ flowchart TB
 
     subgraph EXTERNOS["2 · Integrações externas"]
         direction LR
-        GHCODIGO["GitHub: código da aplicação + Dockerfile"]
+        GHCODIGO["GitHub: código + Dockerfile<br/>trunk-based: branches curtas, PR e main"]
         GHGITOPS["GitHub: charts Helm + values / repositório GitOps"]
         REGISTRY[("Container Registry: imagens versionadas (ex.: GHCR)")]
     end
@@ -48,7 +49,7 @@ flowchart TB
 
         subgraph CICD["Namespace cicd"]
             direction TB
-            JENKINS["Jenkins Controller"] --> AGENTES["Agentes temporários em Pods: testes + build (BuildKit)"]
+            JENKINS["Jenkins Controller"] --> AGENTES["Agentes temporários em Pods: testes + build (BuildKit)<br/>Bash/Python para verificações"]
         end
 
         subgraph GITOPS["Namespace argocd"]
@@ -83,7 +84,7 @@ flowchart TB
     KUBESPRAY --> ARGO
     KUBESPRAY --> APP_DEV
 
-    GHCODIGO -->|push / webhook| JENKINS
+    GHCODIGO -->|PR: validação / main: build| JENKINS
     AGENTES -->|publica imagem| REGISTRY
     AGENTES -->|atualiza versão em Git| GHGITOPS
     GHGITOPS -->|estado desejado| ARGO
@@ -113,7 +114,7 @@ flowchart TB
 #### Fluxo operacional
 
 1. **Preparação do ambiente:** no **Ubuntu**, o **Vagrant** usa o **VirtualBox** para criar as VMs. **Ansible** prepara os servidores, e **Kubespray** (baseado em Ansible) instala e configura o **cluster Kubernetes**.
-2. **CI dentro do Kubernetes:** um `git push` no **GitHub** aciona o **Jenkins Controller** no namespace `cicd`. Agentes efêmeros em Pods executam testes e constroem a imagem (por exemplo, com **BuildKit**, sem montar o socket Docker do host).
+2. **Git e CI dentro do Kubernetes:** utilizamos **Trunk-Based Development** com `main` como trunk, branches curtas e Pull Requests. O **Jenkins Controller**, no namespace `cicd`, valida os PRs com testes automatizados. Após merge na `main`, os agentes efêmeros executam o build da imagem (por exemplo, com **BuildKit**, sem montar o socket Docker do host). Scripts **Bash/Python** apoiam testes, verificações de saúde e automações do pipeline.
 3. **Imagens e configuração versionadas:** o pipeline publica a imagem em um **registry externo**, como **GHCR**, e atualiza a referência da versão no Git que contém os **charts Helm** e os valores de cada ambiente.
 4. **CD com GitOps:** o **Argo CD** no namespace `argocd` observa o estado desejado no Git e sincroniza os releases Helm. **Helm não é um serviço residente separado no cluster**: seus charts são processados pelo fluxo de entrega.
 5. **Três ambientes paralelos:** `dev`, `uat` e `prod` possuem cada um **uma aplicação e um banco próprios**, com conexão interna via **Service/DNS** e armazenamento persistente **PVC** independente. A promoção de versões entre ambientes será controlada pelo fluxo GitOps.
@@ -127,15 +128,30 @@ flowchart TB
 
 | Área | Ferramentas e conceitos |
 | --- | --- |
-| Base do laboratório | Linux, Git, Shell, Vagrant, VirtualBox |
+| Base do laboratório | Linux, Git, Bash, Python básico, Vagrant, VirtualBox |
 | Contêineres e orquestração | Docker, Kubernetes, Helm |
 | Provisionamento e configuração | Ansible, Kubespray, Terraform, Terragrunt |
+| Versionamento e colaboração | Trunk-Based Development, branches curtas, Pull Requests, revisão e proteção da `main` |
 | Entrega contínua | Jenkins, GitHub Actions, Argo CD, GitOps |
 | Dados | PostgreSQL como banco principal e MySQL para estudos SQL; PV/PVC no Kubernetes |
 | Observabilidade | Prometheus, Grafana, Zabbix e Datadog |
 | Operação e confiabilidade | Troubleshooting, testes, falhas controladas, rollback, runbooks, SLOs e análise de incidentes |
 
 A presença de uma ferramenta neste mapa **não significa que ela já está instalada ou integrada**: a implementação ocorre por etapas, conforme os exercícios avançam.
+
+## 🔧 Fundamentos de automação e fluxo Git
+
+Além da infraestrutura, o laboratório inclui **Bash e Python orientados a tarefas reais de SRE**, sem exigir desenvolvimento avançado: checar nós e serviços, consultar APIs, tratar JSON, inspecionar logs e produzir relatórios simples. A ideia é evoluir de scripts executados manualmente para validações automatizadas nos pipelines.
+
+Para versionamento, adotaremos **Trunk-Based Development**:
+
+1. Criar uma **branch de curta duração** a partir da `main`.
+2. Abrir **Pull Request**, revisar alterações e executar testes com Jenkins.
+3. Fazer **merge na `main`** após aprovação e validação.
+4. Construir e publicar uma **imagem versionada**, sem reconstruí-la a cada ambiente.
+5. Atualizar as referências de versão em GitOps e promover **DEV → UAT → PROD** por configuração e aprovação, usando Argo CD e Helm.
+
+Os namespaces `dev`, `uat` e `prod` **não exigem branches permanentes equivalentes** para o código. A estratégia de organização dos repositórios GitOps será detalhada quando implementarmos o pipeline.
 
 ## 📐 Abordagem de estudo
 
@@ -147,15 +163,15 @@ Cada etapa segue um ciclo simples:
 4. **Revisar:** comparar alternativas e fixar os comandos essenciais.
 5. **Repetir:** realizar um exercício curto para consolidar o aprendizado.
 
-O laboratório evolui **progressivamente**: primeiro o deploy manual; depois, padronização com Helm; em seguida, automação com Jenkins; adoção de GitOps com Argo CD; e ampliação do CI/CD com GitHub Actions. Observabilidade e troubleshooting acompanham essa evolução.
+O laboratório evolui **progressivamente**: fundamentos de Git, Bash e Python aplicados a pequenas automações; deploy manual; padronização com Helm; integração contínua com Jenkins e Pull Requests; adoção de GitOps com Argo CD; e ampliação do CI/CD com GitHub Actions. Observabilidade e troubleshooting acompanham essa evolução.
 
 ## 🧭 Roadmap de alto nível
 
 | Fase | Foco | Resultado esperado |
 | --- | --- | --- |
-| **01 · Fundamentos** | Linux, Git, Docker e Kubernetes | Ambiente operacional e domínio dos recursos básicos |
+| **01 · Fundamentos** | Linux, Git/Trunk-Based Development, Bash, Python básico, Docker e Kubernetes | Ambiente operacional, versionamento e primeiros scripts de automação |
 | **02 · Aplicação e infraestrutura** | Helm, SQL, Terraform/Terragrunt e Ansible | Aplicação implantável e infraestrutura documentada |
-| **03 · Entrega e automação** | Jenkins, Argo CD e GitHub Actions | Pipeline de build, testes, deploy e recuperação |
+| **03 · Entrega e automação** | Jenkins, Argo CD, GitHub Actions, scripts Bash/Python e fluxo de PRs | Pipeline de testes, build, promoção entre ambientes, deploy e recuperação |
 | **04 · Confiabilidade** | Prometheus, Grafana, Zabbix, Datadog, testes e incidentes | Operação observável, resposta a falhas e melhoria contínua |
 
 **Ambientes lógicos:** `dev`, `uat` e `prod` serão usados para praticar isolamento e promoção de versões. São ambientes de laboratório, não serviços reais de produção.
