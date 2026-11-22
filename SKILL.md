@@ -11,18 +11,18 @@ Transformar cada atividade prática do laboratório SRE em documentação Markdo
 
 ## Repositório e convenções
 
-- **Repositório:** `brunomori/workspace-devops-automation`
+- **Repositório:** SRE LAB 3.0, atualmente em `brunomori/workspace-devops-automation` (nome de URL previsto: `brunomori/SRE-LAB-3.0`, após renomeação nas configurações GitHub)
 - **Branch padrão:** `main` (verificar antes de gravar).
 - **README principal (overview e navegação breve):** `README.md`
 - **Temas:** `NN-nome-do-tema/README.md`
-- **Tema inicial existente:** `01-iniciar-laboratorio/README.md`
+- **Temas existentes:** `01-automacao-laboratorio/README.md` e `02-iniciar-laboratorio/README.md`
 - **Idioma:** português (Brasil), preservando nomes técnicos, comandos e arquivos.
 - **Estilo:** didático, objetivo, mãos na massa, Markdown válido e comandos em blocos de código `bash`/`yaml` quando relevante.
 
 ## Gatilhos (pedidos equivalentes)
 
 - "Documenta isso no SRE LAB."
-- "Adiciona o Tema 02 ao GitHub."
+- "Adiciona um novo tema ao GitHub."
 - "Vamos continuar o SRE LAB 3.0."
 - "Cria o README desse laboratório."
 - "Usa a skill do SRE LAB."

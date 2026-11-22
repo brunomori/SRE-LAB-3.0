@@ -1,4 +1,4 @@
-# Tema 01 — Iniciar o laboratório
+# Tema 02 — Iniciar o laboratório
 
 > **SRE LAB 3.0** · Guia rápido para subir o ambiente local no Ubuntu.
 
@@ -73,6 +73,6 @@ Esse comando desliga as VMs gerenciadas pelo Vagrant sem destruí-las. **Não us
 
 ---
 
-[← Índice do SRE LAB 3.0](../README.md)
+[← Índice do SRE LAB 3.0](../README.md) · [Tema 01 — Automação do laboratório](../01-automacao-laboratorio/README.md)
 
 **Observação:** este documento registra o procedimento de inicialização utilizado no laboratório local. Os caminhos e alvos do `Makefile` devem ser conferidos caso a estrutura local mude.

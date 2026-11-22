@@ -1,4 +1,4 @@
-# Tema 02 — Script de automação do SRE LAB 3.0
+# Tema 01 — Script de automação do SRE LAB 3.0
 
 > **SRE LAB 3.0 · Documentação do orquestrador Python, comandos e fluxo de operação.**
 
@@ -250,4 +250,4 @@ A ideia é exercitar **evidências → hipótese → causa → mitigação → v
 
 ---
 
-[← Voltar à visão geral do SRE LAB 3.0](../README.md) · [Tema 01 — Iniciar o laboratório](../01-iniciar-laboratorio/README.md)
+[← Voltar à visão geral do SRE LAB 3.0](../README.md) · [Tema 02 — Iniciar o laboratório](../02-iniciar-laboratorio/README.md)
